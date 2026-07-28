@@ -21,9 +21,9 @@ if (Test-Path $apiFile) {
     if ($apiContent -match "127.0.0.1:(\d+)") {
         $apiPort = [int]$Matches[1]
         if ($apiPort -ne 11028) {
-            throw "API_BASE in $apiFile points to port $apiPort but backend serves on 11028. Fix before building — dev proxy masks this, prod will FAIL."
+            throw "API_BASE in $apiFile points to port $apiPort but backend serves on 11028. Fix before building - dev proxy masks this, prod will FAIL."
         }
-        Write-Host "  API_BASE port: $apiPort (matches backend) ✓" -ForegroundColor Green
+        Write-Host "  API_BASE port: $apiPort (matches backend) OK" -ForegroundColor Green
     }
 }
 
@@ -34,18 +34,18 @@ foreach ($dir in $frontendDirs) {
     if (Test-Path "$frontend\package.json") {
         Write-Host "-> [1/4] Building frontend ($dir)..." -ForegroundColor Yellow
         Push-Location $frontend
-        npm install --silent 2>$null
+        bun install 2>$null
 
         Write-Host "  tsc --noEmit..." -ForegroundColor Gray
         $tscOut = npx tsc --noEmit 2>&1
         $tscExit = $LASTEXITCODE
         if ($tscExit -ne 0) {
-            Write-Host "  TypeScript compilation FAILED — fix errors before building NSIS" -ForegroundColor Red
+            Write-Host "  TypeScript compilation FAILED - fix errors before building NSIS" -ForegroundColor Red
             Write-Host $tscOut
-            throw "TypeScript compilation failed — fix all errors before building NSIS installer"
+            throw "TypeScript compilation failed - fix all errors before building NSIS installer"
         }
 
-        npm run build
+        bun run build
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
         Pop-Location
         break
@@ -105,24 +105,24 @@ if (Test-Path $specFile) {
     Remove-Item "$Root\dist\pyi-crash.log" -Force -ErrorAction SilentlyContinue
     Write-Host "  Frozen binary smoke test PASSED" -ForegroundColor Green
 } else {
-    Write-Host "  WARNING: spec file not found at $specFile — using existing backend exe if present" -ForegroundColor DarkYellow
+    Write-Host "  WARNING: spec file not found at $specFile - using existing backend exe if present" -ForegroundColor DarkYellow
 }
 
 # Step 3: Embed in Tauri resources (+ dev fallback)
 Write-Host "-> [3/5] Embedding backend..." -ForegroundColor Yellow
 $src = "$Root\dist\${RepoName}-backend.exe"
-if (-not (Test-Path $src)) { throw "Backend exe not found at $src — PyInstaller step failed" }
+if (-not (Test-Path $src)) { throw "Backend exe not found at $src - PyInstaller step failed" }
 $sizeMB = (Get-Item $src).Length / 1MB
-if ($sizeMB -lt 5) { throw "Backend exe is only $([math]::Round($sizeMB, 1)) MB — PyInstaller produced an empty/broken binary. Check run_server.py and hidden imports." }
+if ($sizeMB -lt 5) { throw "Backend exe is only $([math]::Round($sizeMB, 1)) MB - PyInstaller produced an empty/broken binary. Check run_server.py and hidden imports." }
 Copy-Item $src "$ResourceDir\${RepoName}-backend.exe" -Force
 Copy-Item $src "$DevDir\${RepoName}-backend-$Triple.exe" -Force
 Write-Host "  Backend exe: $((Get-Item $src).Length / 1MB) MB"
 
-# Bundle .env.example (NOT .env — dev .env has personal API keys)
+# Bundle .env.example (NOT .env - dev .env has personal API keys)
 $envExample = "$Root\.env.example"
 if (Test-Path $envExample) {
     Copy-Item $envExample "$ResourceDir\.env.example" -Force
-    Write-Host "  Bundled .env.example ✓" -ForegroundColor Green
+    Write-Host "  Bundled .env.example OK" -ForegroundColor Green
 } else {
     Write-Host "  WARNING: .env.example not found at repo root" -ForegroundColor DarkYellow
 }
