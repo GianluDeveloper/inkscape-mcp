@@ -5,7 +5,7 @@ $frontend = Join-Path $Root "web_sota"
 if (Test-Path "$frontend\package.json") {
     Write-Host "-> Building frontend (web_sota)..." -ForegroundColor Yellow
     Push-Location $frontend
-    npm install --silent 2>$null
+    bun install 2>$null
     Write-Host "  tsc --noEmit..." -ForegroundColor Gray
     $tscOut = npx tsc --noEmit 2>&1
     $tscExit = $LASTEXITCODE
@@ -14,7 +14,7 @@ if (Test-Path "$frontend\package.json") {
         Write-Host $tscOut
         throw "TypeScript compilation failed"
     }
-    npm run build
+    bun run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
     Pop-Location
 } else {
