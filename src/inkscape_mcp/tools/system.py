@@ -254,6 +254,7 @@ async def inkscape_system(
         "hands_in_command",
         "list_extensions",
         "execute_extension",
+        "self_terminate",
     ],
     extension_id: str | None = None,
     _extension_params: dict[str, Any] | None = None,
@@ -327,9 +328,12 @@ async def inkscape_system(
         elif operation == "hands_in_command":
             if not action:
                 return SystemResult(
-                    success=False, operation="hands_in_command",
+                    success=False,
+                    operation="hands_in_command",
                     message="action parameter is required (e.g. 'select-all;object-flip-horizontally')",
-                    data={}, execution_time_ms=0, error="ValueError",
+                    data={},
+                    execution_time_ms=0,
+                    error="ValueError",
                 ).model_dump()
 
             try:
@@ -339,18 +343,23 @@ async def inkscape_system(
                     config.process_timeout,
                 )
                 return SystemResult(
-                    success=True, operation="hands_in_command",
+                    success=True,
+                    operation="hands_in_command",
                     message=f"Sent action to active Inkscape window: {action[:120]}",
                     data={"action": action, "response": result.strip()[:500]},
                     execution_time_ms=(time.time() - start_time) * 1000,
                 ).model_dump()
             except Exception as exc:
                 return SystemResult(
-                    success=False, operation="hands_in_command",
+                    success=False,
+                    operation="hands_in_command",
                     message=f"Hands-in command failed: {exc}. Is Inkscape GUI running?",
-                    data={"action": action,
-                          "hint": "Open Inkscape GUI first, then set INKSCAPE_GUI_WATCH=1"},
-                    execution_time_ms=0, error=str(exc),
+                    data={
+                        "action": action,
+                        "hint": "Open Inkscape GUI first, then set INKSCAPE_GUI_WATCH=1",
+                    },
+                    execution_time_ms=0,
+                    error=str(exc),
                 ).model_dump()
 
         elif operation == "version":
@@ -398,7 +407,9 @@ async def inkscape_system(
                 base = Path(str(config.inkscape_executable)).parent.parent
                 ext_dirs.append(str(base / "share" / "inkscape" / "extensions"))
                 ext_dirs.append(str(Path.home() / ".config" / "inkscape" / "extensions"))
-                ext_dirs.append(str(Path.home() / "AppData" / "Roaming" / "inkscape" / "extensions"))
+                ext_dirs.append(
+                    str(Path.home() / "AppData" / "Roaming" / "inkscape" / "extensions")
+                )
             for d in ext_dirs:
                 dp = Path(d)
                 if dp.is_dir():
@@ -417,15 +428,20 @@ async def inkscape_system(
                                 elif ll.startswith("<id>"):
                                     ext_id = ll.replace("<id>", "").replace("</id>", "").strip()
                             if name:
-                                extensions.append({"id": ext_id or inx.stem, "name": name,
-                                                   "path": str(inx)})
+                                extensions.append(
+                                    {"id": ext_id or inx.stem, "name": name, "path": str(inx)}
+                                )
                         except Exception:
                             pass
             return SystemResult(
-                success=True, operation="list_extensions",
+                success=True,
+                operation="list_extensions",
                 message=f"Found {len(extensions)} extensions in {len(ext_dirs)} directories",
-                data={"extensions": extensions, "total_count": len(extensions),
-                      "source_dirs": ext_dirs},
+                data={
+                    "extensions": extensions,
+                    "total_count": len(extensions),
+                    "source_dirs": ext_dirs,
+                },
                 execution_time_ms=(time.time() - start_time) * 1000,
             ).model_dump()
 
@@ -460,7 +476,7 @@ async def inkscape_system(
                     "inkscape_vector: Advanced vector operations (trace, boolean, optimize, render_preview, etc.)",
                     "inkscape_render: Agent vision exports (export_preview, export_multi_dpi, get_document_summary)",
                     "inkscape_analysis: Document analysis (quality, statistics, validate, objects, dimensions, structure)",
-                    "inkscape_system: System operations (status, execution_mode, help, diagnostics, version, config)",
+                    "inkscape_system: System operations (status, execution_mode, help, diagnostics, version, config, self_terminate)",
                 ],
                 "getting_started": [
                     "Ensure Inkscape 1.0+ is installed",
@@ -477,6 +493,12 @@ async def inkscape_system(
                 data=help_info,
                 execution_time_ms=(time.time() - start_time) * 1000,
             ).model_dump()
+
+        elif operation == "self_terminate":
+            import os
+
+            logger.warning("Self-termination requested by agent")
+            os._exit(0)
 
         elif operation == "config":
             # View configuration

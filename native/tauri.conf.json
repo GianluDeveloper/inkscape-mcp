@@ -5,7 +5,7 @@
     "identifier": "ai.fleet.inkscape-mcp",
     "build": {
         "frontendDist": "../web_sota/dist",
-        "beforeDevCommand": "npm --prefix ../web_sota run dev"
+        "beforeDevCommand": "bun --prefix ../web_sota run dev"
     },
     "app": {
         "windows": [

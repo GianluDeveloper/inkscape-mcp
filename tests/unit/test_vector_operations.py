@@ -3,11 +3,12 @@ Unit tests for Inkscape vector operations tool.
 """
 
 from unittest.mock import AsyncMock
+
 import pytest
 
-from inkscape_mcp.tools.vector_operations import inkscape_vector
-from inkscape_mcp.config import InkscapeConfig
 from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
+from inkscape_mcp.config import InkscapeConfig
+from inkscape_mcp.tools.vector_operations import inkscape_vector
 
 
 class TestInkscapeVectorTool:

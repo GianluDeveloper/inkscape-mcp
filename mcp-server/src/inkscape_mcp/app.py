@@ -23,6 +23,7 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import AsyncGenerator
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,8 @@ try:
     from fastapi import Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
+    from starlette.responses import PlainTextResponse
+    from starlette.responses import StreamingResponse
     from starlette.routing import Mount
 
     FASTAPI_AVAILABLE = True
@@ -390,6 +393,60 @@ async def _save_via_inkscape(svg_xml: str, stem: str, inkscape_exe: str | None) 
         return None
 
 
+# ── Streaming chat helpers ────────────────────────────────────────────────────
+
+
+class _AgenticEvent:
+    """SSE event types for streaming chat."""
+    TEXT = "text"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool_result"
+    DONE = "done"
+
+
+async def _stream_ollama_raw(
+    client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
+) -> AsyncGenerator[str, None]:
+    async with client.stream(
+        "POST", f"{endpoint}/api/chat",
+        json={"model": model, "messages": messages, "stream": True},
+        timeout=120,
+    ) as r:
+        async for line in r.aiter_lines():
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                chunk = data.get("message", {}).get("content", "")
+                if chunk:
+                    yield chunk
+            except json.JSONDecodeError:
+                pass
+
+
+async def _stream_lmstudio_raw(
+    client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
+) -> AsyncGenerator[str, None]:
+    async with client.stream(
+        "POST", f"{endpoint}/v1/chat/completions",
+        json={"messages": messages, "model": model, "temperature": 0.7, "stream": True},
+        timeout=120,
+    ) as r:
+        async for line in r.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            chunk = line[6:]
+            if chunk == "[DONE]":
+                break
+            try:
+                data = json.loads(chunk)
+                delta = data["choices"][0].get("delta", {}).get("content", "")
+                if delta:
+                    yield delta
+            except json.JSONDecodeError:
+                pass
+
+
 # ── FastAPI app factory ───────────────────────────────────────────────────────
 
 
@@ -412,9 +469,19 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "http://127.0.0.1:11027",
+            "http://localhost:11028",
+            "http://127.0.0.1:11029",
+            "http://localhost:11029",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_origin_regex=r"https?://(?:[a-zA-Z0-9-]+\.ts\.net|.*?\.tail-[a-f0-9]+\.ts\.net|tauri\.localhost|localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::\d+)?$|^tauri://localhost$",
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
 
     _attach_memory_logging()
@@ -437,26 +504,115 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     async def api_help() -> dict:
         return _help_payload()
 
-    @app.post("/api/chat")
-    async def api_chat(request: Request) -> dict:
+    @app.get("/api/docs/{path:path}")
+    async def api_docs(path: str) -> PlainTextResponse:
+        """Serve markdown files from the docs/ directory for the webapp help page."""
+        # Security: only allow .md files, reject absolute paths and parent traversal
+        if not path.endswith(".md") or ".." in path or path.startswith("/"):
+            return PlainTextResponse("Not found", status_code=404)
+        # Try repo-root docs/ first, then repo root
+        for base in [Path(inkscape_exe).parent.parent if inkscape_exe else Path.cwd(), Path.cwd()]:
+            md_file = base / "docs" / path
+            if md_file.exists():
+                return PlainTextResponse(md_file.read_text(encoding="utf-8", errors="replace"))
+            md_file = base / path
+            if md_file.exists():
+                return PlainTextResponse(md_file.read_text(encoding="utf-8", errors="replace"))
+        return PlainTextResponse("Not found", status_code=404)
+
+    @app.post("/api/chat", response_model=None)
+    async def api_chat(request: Request):
         try:
             payload = await request.json()
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        msg = payload.get("message", "")
-        if not isinstance(msg, str):
-            msg = str(msg)
-        logger.info("REST: /api/chat (len=%d)", len(msg))
-        return {
-            "reply": (
-                "This dashboard does not run a standalone chat LLM. "
-                "Use an MCP-capable IDE (Cursor, Claude Desktop) with the inkscape-mcp server for natural-language tool use. "
-                "If you install Ollama, optional POST /api/generate-svg (and health checks) can use it."
-            ),
-            "echo": msg[:2000],
-        }
+        query = str(payload.get("query") or payload.get("message", ""))
+        provider = str(payload.get("provider") or "ollama")
+        model = str(payload.get("model") or "qwen2.5-coder:latest")
+        endpoint = str(payload.get("endpoint") or _ollama_base()).rstrip("/")
+        system_prompt = str(payload.get("system_prompt", ""))
+        stream = bool(payload.get("stream", False))
+        mode = str(payload.get("mode", "llm"))
+        history = payload.get("history", [])
+        if not isinstance(history, list):
+            history = []
+
+        logger.info("REST: /api/chat (query=%r, provider=%s, stream=%s, mode=%s)", query[:60], provider, stream, mode)
+
+        if not query:
+            return {"reply": "", "status": "error"}
+
+        if not stream:
+            return {"reply": "Streaming is required for chat. Set stream=true.", "status": "error"}
+
+        async def _event_stream():
+            msgs: list[dict] = []
+            if system_prompt:
+                msgs.append({"role": "system", "content": system_prompt})
+            for h in history:
+                msgs.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+            msgs.append({"role": "user", "content": query})
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                if provider == "lmstudio":
+                    generator = _stream_lmstudio_raw(client, endpoint, model, msgs)
+                else:
+                    generator = _stream_ollama_raw(client, endpoint, model, msgs)
+
+                async for chunk in generator:
+                    yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': chunk})}\n\n"
+
+            yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # ── /api/llm/providers (auto-discovery for webapp chat settings) ─────────
+    @app.get("/api/llm/providers")
+    async def llm_providers() -> dict:
+        providers: list[dict] = []
+        # Ollama
+        ollama_ok = False
+        ollama_models: list[str] = []
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get(f"{_ollama_base()}/api/tags")
+                if r.status_code == 200:
+                    ollama_models = [m["name"] for m in r.json().get("models", [])]
+                    ollama_ok = True
+        except Exception:
+            pass
+        providers.append({
+            "type": "ollama",
+            "base_url": _ollama_base(),
+            "models": ollama_models,
+            "reachable": ollama_ok,
+        })
+        # LM Studio
+        lm_ok = False
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as c:
+                r = await c.get("http://127.0.0.1:1234/v1/models")
+                if r.status_code == 200:
+                    lm_ok = True
+        except Exception:
+            pass
+        providers.append({
+            "type": "lmstudio",
+            "base_url": "http://127.0.0.1:1234",
+            "models": [],
+            "reachable": lm_ok,
+        })
+        return {"providers": providers}
 
     # ── /api/health ──────────────────────────────────────────────────────────
     @app.get("/api/health")
@@ -492,11 +648,14 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 pass
 
         tool_groups: list[dict[str, Any]] = []
-        from ..tools import PORTMANTEAU_TOOLS
-        for pt in PORTMANTEAU_TOOLS:
-            tool_groups.append({"name": pt["name"], "category": pt.get("category", pt["name"]),
-                                "operations": pt.get("operations", []),
-                                "op_count": len(pt.get("operations", []))})
+        try:
+            from inkscape_mcp.tools import PORTMANTEAU_TOOLS
+            for pt in PORTMANTEAU_TOOLS:
+                tool_groups.append({"name": pt["name"], "category": pt.get("category", pt["name"]),
+                                    "operations": pt.get("operations", []),
+                                    "op_count": len(pt.get("operations", []))})
+        except Exception:
+            pass
 
         return {
             "status": "ok",
@@ -663,6 +822,37 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 "error": None if not is_error else "Tool returned error",
             }
         )
+
+    # ── /api/skills ──────────────────────────────────────────────────────────
+    @app.get("/api/skills")
+    async def list_skills():
+        return {
+            "skills": [
+                {"name": "inkscape", "description": "Inkscape vector graphics skill — SVG creation, editing, analysis, and export"},
+            ]
+        }
+
+    @app.get("/api/skills/{skill_name}")
+    async def get_skill(skill_name: str):
+        from pathlib import Path as _Path  # noqa: PLC0415
+        skill_path = _Path(__file__).parent / "skills" / "SKILL.md"
+        if not skill_path.exists():
+            return {"ok": False, "error": "not found"}
+        content = skill_path.read_text(encoding="utf-8")
+        return {"ok": True, "name": skill_name, "content": content}
+
+    # ── /api/fleet/overview ──────────────────────────────────────────────────
+    @app.get("/api/fleet/overview")
+    async def fleet_overview():
+        return {
+            "ships": [
+                {"name": "inkscape-mcp", "port": 11028, "status": "running", "category": "Graphics"},
+                {"name": "gimp-mcp", "port": 10772, "status": "unknown", "category": "Graphics"},
+                {"name": "blender-mcp", "port": 10848, "status": "unknown", "category": "3D"},
+                {"name": "kicad-mcp", "port": 11016, "status": "unknown", "category": "EDA"},
+            ],
+            "summary": {"total": 4, "running": 1},
+        }
 
     # ── /api/capabilities ────────────────────────────────────────────────────
     @app.get("/api/capabilities")

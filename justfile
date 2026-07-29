@@ -1,4 +1,4 @@
-set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 import 'scripts/just/fleet.just'
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ audit-deps:
 # ── Operation ─────────────────────────────────────────────────────────────────
 
 # Launch Inkscape MCP (HTTP mode)
-serve port="11028":
+serve port="11027":
     uv run inkscape-mcp --mode http --port {{port}}
 
 # Quick fmt alias (calls fix)
@@ -99,16 +99,13 @@ pre-commit:
 # Build the PyInstaller backend .exe (step before Tauri build)
 build-sidecar:
     Set-Location '{{justfile_directory()}}\native'
-    pwsh -NoProfile -File .\build.ps1
+    powershell.exe -NoProfile -File .\build.ps1
 
 # Build the Tauri NSIS desktop installer (full pipeline)
 build-native:
     Set-Location '{{justfile_directory()}}\native'
-    pwsh -NoProfile -File .\build.ps1
+    powershell.exe -NoProfile -File .\build.ps1
 
-# Run the CUA smoke test against the installed NSIS app
-cua-nsis-test:
-	C:\Windows\py.exe scripts/cua-smoke.py
 # ── Playwright E2E ─────────────────────────────────────────────────────
 
 # Install Playwright browsers (one-time)
@@ -125,11 +122,11 @@ e2e:
 
 # Capture screenshots of all webapp pages
 capture-screenshots:
-    pwsh -NoProfile -File '{{justfile_directory()}}\scripts\capture-demo.ps1' -Screenshots
+    powershell.exe -NoProfile -File '{{justfile_directory()}}\scripts\capture-demo.ps1' -Screenshots
 
 # Record video walkthrough of the webapp
 capture-video:
-    pwsh -NoProfile -File '{{justfile_directory()}}\scripts\capture-demo.ps1' -Video
+    powershell.exe -NoProfile -File '{{justfile_directory()}}\scripts\capture-demo.ps1' -Video
 
 # Capture both screenshots and video
 capture: capture-screenshots capture-video

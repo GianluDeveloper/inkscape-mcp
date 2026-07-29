@@ -1,6 +1,7 @@
 """Phase 1 Agent Lab tool tests (inkscape_render + execution_mode)."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import pytest
 

@@ -144,7 +144,9 @@ class ShellModeWrapper:
         try:
             response = await asyncio.wait_for(self._read_until_prompt(), timeout=self._timeout)
         except TimeoutError as te:
-            raise ShellModeError(f"Inkscape shell timed out ({self._timeout}s) on: {command!r}") from te
+            raise ShellModeError(
+                f"Inkscape shell timed out ({self._timeout}s) on: {command!r}"
+            ) from te
         logger.debug("Shell ← %r", response[:120])
         return response
 

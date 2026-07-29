@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct BackendProcess(pub Mutex<Option<Child>>);
 
 const BACKEND_NAME: &str = "inkscape-mcp-backend.exe";
-const BACKEND_PORT: u16 = 11028;
+const BACKEND_PORT: u16 = 11027;
 
 fn dev_backend_path() -> Option<PathBuf> {
     if !cfg!(debug_assertions) {
@@ -104,8 +104,7 @@ fn free_port(port: u16) -> bool {
     #[cfg(windows)]
     {
         // Fire-and-forget kill via Start-Process (non-blocking).
-        // The Python E10048 retry loop (5×60s) and the indefinite
-        // health check thread handle the rest.
+        // The Python E10048 retry loop (5×5s) handles lingering processes.
         let kill = format!(
             "Start-Process powershell -WindowStyle Hidden -ArgumentList \
              '-NoProfile -Command \"Stop-Process -Name inkscape-mcp-backend -Force -ErrorAction SilentlyContinue; \
@@ -165,14 +164,17 @@ pub fn spawn_backend(app: AppHandle, state: &BackendProcess) -> Result<String, S
         .env("MCP_PORT", BACKEND_PORT.to_string())
         .env("MCP_HOST", "127.0.0.1")
         .env("PYTHONUNBUFFERED", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .env("INKSCAPE_TAURI", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        // No creation flags — let the backend inherit the parent's console.
+        // CREATE_NO_WINDOW + Stdio::piped() breaks PyInstaller's console init
+        // even with console=False in the spec. The backend needs a valid
+        // stderr handle to initialize loguru and uvicorn.
     }
 
     let mut child = command

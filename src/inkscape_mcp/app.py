@@ -23,10 +23,11 @@ import os
 import re
 import tempfile
 import threading
+from collections.abc import AsyncGenerator
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
 
 try:
     import httpx
@@ -397,6 +398,7 @@ async def _save_via_inkscape(svg_xml: str, stem: str, inkscape_exe: str | None) 
 
 class _AgenticEvent:
     """SSE event types for streaming chat."""
+
     TEXT = "text"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -407,7 +409,8 @@ async def _stream_ollama_raw(
     client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
 ) -> AsyncGenerator[str, None]:
     async with client.stream(
-        "POST", f"{endpoint}/api/chat",
+        "POST",
+        f"{endpoint}/api/chat",
         json={"model": model, "messages": messages, "stream": True},
         timeout=120,
     ) as r:
@@ -427,7 +430,8 @@ async def _stream_lmstudio_raw(
     client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
 ) -> AsyncGenerator[str, None]:
     async with client.stream(
-        "POST", f"{endpoint}/v1/chat/completions",
+        "POST",
+        f"{endpoint}/v1/chat/completions",
         json={"messages": messages, "model": model, "temperature": 0.7, "stream": True},
         timeout=120,
     ) as r:
@@ -468,9 +472,19 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "http://127.0.0.1:11027",
+            "http://localhost:11028",
+            "http://127.0.0.1:11029",
+            "http://localhost:11029",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_origin_regex=r"https?://(?:[a-zA-Z0-9-]+\.ts\.net|.*?\.tail-[a-f0-9]+\.ts\.net|tauri\.localhost|localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|100\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::\d+)?$|^tauri://localhost$",
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
 
     _attach_memory_logging()
@@ -509,8 +523,8 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 return PlainTextResponse(md_file.read_text(encoding="utf-8", errors="replace"))
         return PlainTextResponse("Not found", status_code=404)
 
-    @app.post("/api/chat")
-    async def api_chat(request: Request) -> dict | StreamingResponse:
+    @app.post("/api/chat", response_model=None)
+    async def api_chat(request: Request):
         try:
             payload = await request.json()
         except Exception:
@@ -528,7 +542,13 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         if not isinstance(history, list):
             history = []
 
-        logger.info("REST: /api/chat (query=%r, provider=%s, stream=%s, mode=%s)", query[:60], provider, stream, mode)
+        logger.info(
+            "REST: /api/chat (query=%r, provider=%s, stream=%s, mode=%s)",
+            query[:60],
+            provider,
+            stream,
+            mode,
+        )
 
         if not query:
             return {"reply": "", "status": "error"}
@@ -580,12 +600,14 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                     ollama_ok = True
         except Exception:
             pass
-        providers.append({
-            "type": "ollama",
-            "base_url": _ollama_base(),
-            "models": ollama_models,
-            "reachable": ollama_ok,
-        })
+        providers.append(
+            {
+                "type": "ollama",
+                "base_url": _ollama_base(),
+                "models": ollama_models,
+                "reachable": ollama_ok,
+            }
+        )
         # LM Studio
         lm_ok = False
         try:
@@ -595,12 +617,14 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                     lm_ok = True
         except Exception:
             pass
-        providers.append({
-            "type": "lmstudio",
-            "base_url": "http://127.0.0.1:1234",
-            "models": [],
-            "reachable": lm_ok,
-        })
+        providers.append(
+            {
+                "type": "lmstudio",
+                "base_url": "http://127.0.0.1:1234",
+                "models": [],
+                "reachable": lm_ok,
+            }
+        )
         return {"providers": providers}
 
     # ── /api/health ──────────────────────────────────────────────────────────
@@ -628,21 +652,26 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         # Build tool list and group by category
         tool_list: list[str] = []
         tool_count = 0
-        if hasattr(mcp, "_tool_manager"):
-            try:
-                raw_tools = mcp._tool_manager.list_tools()
-                tool_list = [t.name for t in raw_tools]
-                tool_count = len(tool_list)
-            except Exception:
-                pass
+        try:
+            raw_tools = await mcp.list_tools()
+            tool_list = [t.name for t in raw_tools]
+            tool_count = len(tool_list)
+        except Exception:
+            pass
 
         tool_groups: list[dict[str, Any]] = []
         try:
             from inkscape_mcp.tools import PORTMANTEAU_TOOLS
+
             for pt in PORTMANTEAU_TOOLS:
-                tool_groups.append({"name": pt["name"], "category": pt.get("category", pt["name"]),
-                                    "operations": pt.get("operations", []),
-                                    "op_count": len(pt.get("operations", []))})
+                tool_groups.append(
+                    {
+                        "name": pt["name"],
+                        "category": pt.get("category", pt["name"]),
+                        "operations": pt.get("operations", []),
+                        "op_count": len(pt.get("operations", [])),
+                    }
+                )
         except Exception:
             pass
 
@@ -678,11 +707,11 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     @app.get("/api/v1/diagnostics")
     async def diagnostics() -> dict:
         tools = []
-        if hasattr(mcp, "_tool_manager"):
-            try:
-                tools = [{"name": t.name} for t in mcp._tool_manager.list_tools()]
-            except Exception:
-                pass
+        try:
+            raw = await mcp.list_tools()
+            tools = [{"name": t.name} for t in raw]
+        except Exception:
+            pass
         return {
             "status": "ok",
             "server": "inkscape-mcp",
@@ -692,6 +721,24 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             "tools": tools,
             "system": {"windows": True},
             "errors": [],
+        }
+
+    # ── /api/v1/system/info (CUA-NSIS feature smoke test) ────────────────
+    @app.get("/api/v1/system/info")
+    async def system_info() -> dict:
+        tools = []
+        try:
+            raw = await mcp.list_tools()
+            tools = [{"name": t.name} for t in raw]
+        except Exception:
+            pass
+        return {
+            "status": "ok",
+            "server": "inkscape-mcp",
+            "version": "2.6.0",
+            "tool_count": len(tools),
+            "tools": tools,
+            "system": {"windows": True},
         }
 
     # ── /api/generate-svg ────────────────────────────────────────────────────
@@ -811,6 +858,46 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 "error": None if not is_error else "Tool returned error",
             }
         )
+
+    # ── /api/skills ──────────────────────────────────────────────────────────
+    @app.get("/api/skills")
+    async def list_skills():
+        return {
+            "skills": [
+                {
+                    "name": "inkscape",
+                    "description": "Inkscape vector graphics skill — SVG creation, editing, analysis, and export",
+                },
+            ]
+        }
+
+    @app.get("/api/skills/{skill_name}")
+    async def get_skill(skill_name: str):
+        from pathlib import Path as _Path  # noqa: PLC0415
+
+        skill_path = _Path(__file__).parent / "skills" / "SKILL.md"
+        if not skill_path.exists():
+            return {"ok": False, "error": "not found"}
+        content = skill_path.read_text(encoding="utf-8")
+        return {"ok": True, "name": skill_name, "content": content}
+
+    # ── /api/fleet/overview ──────────────────────────────────────────────────
+    @app.get("/api/fleet/overview")
+    async def fleet_overview():
+        return {
+            "ships": [
+                {
+                    "name": "inkscape-mcp",
+                    "port": 11028,
+                    "status": "running",
+                    "category": "Graphics",
+                },
+                {"name": "gimp-mcp", "port": 10772, "status": "unknown", "category": "Graphics"},
+                {"name": "blender-mcp", "port": 10848, "status": "unknown", "category": "3D"},
+                {"name": "kicad-mcp", "port": 11016, "status": "unknown", "category": "EDA"},
+            ],
+            "summary": {"total": 4, "running": 1},
+        }
 
     # ── /api/capabilities ────────────────────────────────────────────────────
     @app.get("/api/capabilities")

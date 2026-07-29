@@ -35,9 +35,18 @@ const PRESETS: Preset[] = [
   { id: "shake", label: "Shake", icon: "≈", desc: "Vibration shake" },
 ];
 
-function buildSvg(presetId: string, dur: number, fill: string, size: number, shape: string): string {
-  const cx = 200, cy = 200, r = size;
-  const w = 400, h = 400;
+function buildSvg(
+  presetId: string,
+  dur: number,
+  fill: string,
+  size: number,
+  shape: string,
+): string {
+  const cx = 200,
+    cy = 200,
+    r = size;
+  const w = 400,
+    h = 400;
   switch (presetId) {
     case "bounce": {
       const rise = cy - r * 4;
@@ -55,7 +64,10 @@ function buildSvg(presetId: string, dur: number, fill: string, size: number, sha
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#1e293b"/><${shape} cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"><animate attributeName="r" values="${r};${r * 1.5};${r}" dur="${dur}s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0.6;1" dur="${dur}s" repeatCount="indefinite"/></${shape}></svg>`;
     case "shake": {
       const amp = r * 0.3;
-      const vals = Array.from({ length: 16 }, (_, i) => `${cx + amp * Math.sin(i * Math.PI / 4)}`).join(";");
+      const vals = Array.from(
+        { length: 16 },
+        (_, i) => `${cx + amp * Math.sin((i * Math.PI) / 4)}`,
+      ).join(";");
       return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="#1e293b"/><${shape} cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"><animate attributeName="cx" values="${cx};${vals}" dur="${dur}s" repeatCount="indefinite"/></${shape}></svg>`;
     }
     default:
@@ -73,7 +85,14 @@ export function AnimationStudio() {
   const [, setKey] = useState(0);
 
   const svgContent = useMemo(
-    () => buildSvg(presetId, parseFloat(duration) || 2, color, parseInt(size) || 50, shape),
+    () =>
+      buildSvg(
+        presetId,
+        parseFloat(duration) || 2,
+        color,
+        parseInt(size) || 50,
+        shape,
+      ),
     [presetId, duration, color, size, shape],
   );
 
@@ -97,7 +116,9 @@ export function AnimationStudio() {
       <div className="flex items-center gap-3">
         <Sparkles className="h-6 w-6 text-purple-500" />
         <div>
-          <h1 className="text-lg font-semibold text-slate-100">Animation Studio</h1>
+          <h1 className="text-lg font-semibold text-slate-100">
+            Animation Studio
+          </h1>
           <p className="text-sm text-slate-200">
             Generate SVG animations with SMIL presets — no Inkscape needed
           </p>
@@ -111,7 +132,7 @@ export function AnimationStudio() {
             <CardTitle className="flex items-center gap-2 text-sm text-slate-200">
               <Eye className="h-4 w-4 text-purple-400" /> Preview
             </CardTitle>
-            <CardDescription className="text-xs">
+            <CardDescription className="text-sm">
               {preset?.label || "Animation preview"}
             </CardDescription>
           </CardHeader>
@@ -152,21 +173,26 @@ export function AnimationStudio() {
             <CardTitle className="flex items-center gap-2 text-sm text-slate-200">
               <Play className="h-4 w-4 text-purple-400" /> Controls
             </CardTitle>
-            <CardDescription className="text-xs">
+            <CardDescription className="text-sm">
               Configure animation parameters
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-xs text-slate-400">Preset</Label>
+              <Label className="text-sm text-slate-300">Preset</Label>
               <Select value={presetId} onValueChange={setPresetId}>
                 <SelectTrigger className="border-slate-800 bg-slate-900 text-sm text-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="border-slate-800 bg-slate-950">
                   {PRESETS.map((p) => (
-                    <SelectItem key={p.id} value={p.id} className="text-slate-200">
-                      <span className="mr-2">{p.icon}</span> {p.label} — {p.desc}
+                    <SelectItem
+                      key={p.id}
+                      value={p.id}
+                      className="text-slate-200"
+                    >
+                      <span className="mr-2">{p.icon}</span> {p.label} —{" "}
+                      {p.desc}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -174,7 +200,9 @@ export function AnimationStudio() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-slate-400">Duration (seconds)</Label>
+              <Label className="text-sm text-slate-300">
+                Duration (seconds)
+              </Label>
               <Input
                 type="number"
                 min="0.5"
@@ -187,7 +215,7 @@ export function AnimationStudio() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs text-slate-400">Color</Label>
+              <Label className="text-sm text-slate-300">Color</Label>
               <div className="flex gap-2">
                 <Input
                   type="color"
@@ -199,14 +227,14 @@ export function AnimationStudio() {
                   type="text"
                   value={color}
                   onChange={(e) => setColor(e.target.value)}
-                  className="flex-1 border-slate-800 bg-slate-900 text-slate-200 font-mono text-xs"
+                  className="flex-1 border-slate-800 bg-slate-900 text-slate-200 font-mono text-sm"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-xs text-slate-400">Size</Label>
+                <Label className="text-sm text-slate-300">Size</Label>
                 <Input
                   type="number"
                   min="10"
@@ -217,14 +245,18 @@ export function AnimationStudio() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs text-slate-400">Shape</Label>
+                <Label className="text-sm text-slate-300">Shape</Label>
                 <Select value={shape} onValueChange={setShape}>
                   <SelectTrigger className="border-slate-800 bg-slate-900 text-sm text-slate-200">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="border-slate-800 bg-slate-950">
-                    <SelectItem value="circle" className="text-slate-200">Circle</SelectItem>
-                    <SelectItem value="rect" className="text-slate-200">Square</SelectItem>
+                    <SelectItem value="circle" className="text-slate-200">
+                      Circle
+                    </SelectItem>
+                    <SelectItem value="rect" className="text-slate-200">
+                      Square
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -254,8 +286,10 @@ export function AnimationStudio() {
               >
                 <span className="text-lg">{p.icon}</span>
                 <div>
-                  <div className="text-sm font-medium text-slate-200">{p.label}</div>
-                  <div className="text-xs text-slate-500">{p.desc}</div>
+                  <div className="text-sm font-medium text-slate-200">
+                    {p.label}
+                  </div>
+                  <div className="text-sm text-slate-400">{p.desc}</div>
                 </div>
               </button>
             ))}

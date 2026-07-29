@@ -80,7 +80,7 @@ export function Settings() {
   const oll = health?.providers?.ollama;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="settings-page">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-white">
@@ -116,16 +116,16 @@ export function Settings() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-300">
           <div>
-            <span className="text-slate-500">Inkscape executable: </span>
+            <span className="text-slate-400">Inkscape executable: </span>
             <code className="break-all text-slate-200">{ink?.path ?? "—"}</code>
           </div>
           <div>
-            <span className="text-slate-500">CLI detected: </span>
+            <span className="text-slate-400">CLI detected: </span>
             {ink?.available ? "yes" : "no"}
           </div>
           {ink?.version_line && (
             <div>
-              <span className="text-slate-500">Version: </span>
+              <span className="text-slate-400">Version: </span>
               {ink.version_line}
             </div>
           )}
@@ -149,28 +149,28 @@ export function Settings() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-slate-300">
           <div>
-            <span className="text-slate-500">Reachable: </span>
+            <span className="text-slate-400">Reachable: </span>
             {oll?.available ? "yes" : "no"}
           </div>
           <div>
-            <span className="text-slate-500">Base URL: </span>
+            <span className="text-slate-400">Base URL: </span>
             <code className="text-slate-200">{oll?.base_url ?? "—"}</code>
           </div>
           <div>
-            <span className="text-slate-500">Default model env: </span>
+            <span className="text-slate-400">Default model env: </span>
             <code className="text-slate-200">{oll?.model ?? "—"}</code>
           </div>
           <div>
-            <span className="text-slate-500">Models (tags): </span>
+            <span className="text-slate-400">Models (tags): </span>
             {oll?.models && oll.models.length > 0 ? (
-              <ul className="mt-1 list-inside list-disc font-mono text-xs text-slate-300">
+              <ul className="mt-1 list-inside list-disc font-mono text-sm text-slate-300">
                 {oll.models.slice(0, 20).map((m) => (
                   <li key={m}>{m}</li>
                 ))}
                 {oll.models.length > 20 && <li>…</li>}
               </ul>
             ) : (
-              <span className="text-slate-500">
+              <span className="text-slate-400">
                 none (Ollama not running or not installed)
               </span>
             )}
@@ -188,7 +188,7 @@ export function Settings() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-slate-300">
           {llmProviders.length === 0 && (
-            <p className="text-slate-500">
+            <p className="text-slate-400">
               No providers discovered. Start Ollama or LM Studio.
             </p>
           )}
@@ -202,8 +202,8 @@ export function Settings() {
                 <span
                   className={
                     p.models.length
-                      ? "text-emerald-400 text-xs"
-                      : "text-slate-600 text-xs"
+                      ? "text-emerald-400 text-sm"
+                      : "text-slate-600 text-sm"
                   }
                 >
                   {p.models.length
@@ -211,19 +211,19 @@ export function Settings() {
                     : "unreachable"}
                 </span>
               </div>
-              <code className="block text-xs text-slate-500">{p.base_url}</code>
+              <code className="block text-sm text-slate-400">{p.base_url}</code>
               {p.models.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {p.models.slice(0, 10).map((m) => (
                     <span
                       key={m}
-                      className="text-xs bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded"
+                      className="text-sm bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded"
                     >
                       {m}
                     </span>
                   ))}
                   {p.models.length > 10 && (
-                    <span className="text-xs text-slate-600">
+                    <span className="text-sm text-slate-600">
                       +{p.models.length - 10} more
                     </span>
                   )}

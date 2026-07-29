@@ -59,7 +59,7 @@ export function Actions() {
         <h2 className="text-2xl font-bold tracking-tight text-white">
           Vector Actions
         </h2>
-        <p className="text-slate-400">
+        <p className="text-slate-300">
           Execute advanced Inkscape vector operations
         </p>
       </div>
@@ -119,7 +119,7 @@ function ActionCard({ title, description, icon: Icon, status, onRun }: any) {
           </div>
           <CardTitle className="text-white">{title}</CardTitle>
         </div>
-        <CardDescription className="text-slate-400">
+        <CardDescription className="text-slate-300">
           {description}
         </CardDescription>
       </CardHeader>

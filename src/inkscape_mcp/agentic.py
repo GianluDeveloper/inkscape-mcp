@@ -208,7 +208,10 @@ def register_agentic_tools(mcp_instance=None):
     if mcp_instance is None:
         from .main import mcp as mcp_instance  # noqa: PLC0415
 
-    @mcp_instance.tool()
+    _mutating = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}
+    _read_only = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+
+    @mcp_instance.tool(annotations=_mutating)
     async def generate_svg(
         ctx: Any,
         description: str = "a simple geometric design",
@@ -347,7 +350,7 @@ def register_agentic_tools(mcp_instance=None):
             ],
         }
 
-    @mcp_instance.tool()
+    @mcp_instance.tool(annotations=_mutating)
     async def agentic_inkscape_workflow(
         workflow_prompt: str,
         available_operations: list[str] | None = None,
@@ -411,7 +414,7 @@ def register_agentic_tools(mcp_instance=None):
                 "message": "Multi-step sampling failed.",
             }
 
-    @mcp_instance.tool()
+    @mcp_instance.tool(annotations=_mutating)
     async def intelligent_vector_processing(
         documents: list[dict[str, Any]],
         processing_goal: str,
@@ -483,7 +486,7 @@ def register_agentic_tools(mcp_instance=None):
                 "message": "Multi-step sampling failed.",
             }
 
-    @mcp_instance.tool()
+    @mcp_instance.tool(annotations=_read_only)
     async def conversational_inkscape_assistant(
         user_query: str,
         context_level: str = "comprehensive",

@@ -7,19 +7,21 @@ including mocks, test data, and environment setup.
 
 import asyncio
 import os
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional
-from unittest.mock import Mock, AsyncMock, patch
+from typing import Any
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
+from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
+
 # Import the modules we're testing
 from inkscape_mcp.config import InkscapeConfig
-from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
 from inkscape_mcp.inkscape_detector import InkscapeDetector
-
 
 # ===== FIXTURE SCOPE DEFINITIONS =====
 
@@ -359,7 +361,7 @@ async def integration_wrapper(integration_config):
 def assert_success():
     """Assertion helper for successful operations."""
 
-    def _assert_success(result: Dict[str, Any], operation: str = ""):
+    def _assert_success(result: dict[str, Any], operation: str = ""):
         assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
         assert result.get("success") is True, (
             f"Operation {operation} should succeed: {result.get('message', 'No message')}"
@@ -373,7 +375,7 @@ def assert_success():
 def assert_error():
     """Assertion helper for error conditions."""
 
-    def _assert_error(result: Dict[str, Any], expected_error_type: Optional[str] = None):
+    def _assert_error(result: dict[str, Any], expected_error_type: str | None = None):
         assert isinstance(result, dict), f"Result should be dict, got {type(result)}"
         assert result.get("success") is False, f"Operation should fail: {result}"
 

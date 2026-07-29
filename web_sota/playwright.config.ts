@@ -9,9 +9,14 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "uv run python -m inkscape_mcp.server --port 11028",
+    command: "uv run python -m inkscape_mcp.main --mode http --port 11028 --host 127.0.0.1",
     port: 11028,
-    timeout: 30000,
-    reuseExistingServer: false,
+    timeout: 45000,
+    reuseExistingServer: true,
+    env: {
+      INKSCAPE_PATH: "C:\\Program Files\\Inkscape\\bin\\inkscape.exe",
+      MCP_PORT: "11028",
+      MCP_TRANSPORT: "http",
+    },
   },
 });

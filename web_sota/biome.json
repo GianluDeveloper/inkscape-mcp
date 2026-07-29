@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "ignore": ["dist"]
+    "includes": ["**", "!**/dist"]
   },
   "formatter": {
     "enabled": true,
@@ -16,7 +16,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "a11y": {
         "useButtonType": "warn",
         "useKeyWithClickEvents": "warn",

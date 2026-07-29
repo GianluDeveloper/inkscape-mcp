@@ -5,7 +5,8 @@ Unit tests for Inkscape detector module.
 import os
 import platform
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
@@ -113,7 +114,6 @@ class TestInkscapeDetector:
     def test_linux_detection_paths(self):
         """Test Linux detection searches correct paths."""
         detector = InkscapeDetector()
-
 
         with patch("shutil.which") as mock_which:
             mock_which.return_value = None

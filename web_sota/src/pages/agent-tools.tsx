@@ -149,7 +149,7 @@ export function AgentTools() {
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
               tab === t.id
                 ? "bg-blue-600 text-white"
-                : "bg-slate-900 text-slate-400 hover:text-white"
+                : "bg-slate-900 text-slate-300 hover:text-white"
             }`}
           >
             <t.icon className="w-4 h-4" />
@@ -341,7 +341,7 @@ export function AgentTools() {
               </button>
             </div>
             {previews.length === 0 ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-400">
                 No previews yet. Run export_preview first.
               </p>
             ) : (
@@ -354,7 +354,7 @@ export function AgentTools() {
                     <div className="font-medium text-white truncate">
                       {p.outputPath}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
+                    <div className="text-xs text-slate-400 mt-1">
                       {p.inputPath} · {p.dpi ?? "?"} DPI ·{" "}
                       {new Date(p.capturedAt).toLocaleString()}
                     </div>

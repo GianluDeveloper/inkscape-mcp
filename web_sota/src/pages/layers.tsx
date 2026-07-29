@@ -1,6 +1,5 @@
-import { EyeOff, Eye, Loader2, Lock, Plus, Unlock } from "lucide-react";
+import { Eye, EyeOff, Loader2, Lock, Plus, Unlock } from "lucide-react";
 import { useCallback, useState } from "react";
-import API_BASE from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import API_BASE from "@/lib/api";
 
 interface Layer {
   id: string;
@@ -41,7 +41,10 @@ export function LayerManager() {
     setLoading(true);
     setError(null);
     try {
-      const r = await callTool("inkscape_layers", { operation: "list", input_path: inputPath });
+      const r = await callTool("inkscape_layers", {
+        operation: "list",
+        input_path: inputPath,
+      });
       setLayers(r?.result?.data?.layers || []);
     } catch (e: any) {
       setError(e.message);
@@ -100,7 +103,9 @@ export function LayerManager() {
           <Eye className="h-4 w-4" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold text-slate-100">Layer Manager</h1>
+          <h1 className="text-lg font-semibold text-slate-100">
+            Layer Manager
+          </h1>
           <p className="text-sm text-slate-200">
             List, create, rename, hide/show, and lock/unlock layers
           </p>
@@ -110,7 +115,7 @@ export function LayerManager() {
       <Card className="border-slate-800 bg-slate-950/50">
         <CardHeader>
           <CardTitle className="text-sm text-slate-200">SVG File</CardTitle>
-          <CardDescription className="text-xs">
+          <CardDescription className="text-sm">
             Path to an SVG file on the server
           </CardDescription>
         </CardHeader>
@@ -120,7 +125,7 @@ export function LayerManager() {
               value={inputPath}
               onChange={(e) => setInputPath(e.target.value)}
               placeholder="/path/to/document.svg"
-              className="flex-1 border-slate-800 bg-slate-900 font-mono text-xs text-slate-200"
+              className="flex-1 border-slate-800 bg-slate-900 font-mono text-sm text-slate-200"
             />
             <Button
               variant="outline"
@@ -177,7 +182,7 @@ export function LayerManager() {
         </CardHeader>
         <CardContent>
           {layers.length === 0 && !loading && (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-400">
               No layers loaded. Enter an SVG path and click Load.
             </p>
           )}
@@ -202,14 +207,16 @@ export function LayerManager() {
                     <span className="text-sm font-medium text-slate-200">
                       {layer.label || layer.id}
                     </span>
-                    <span className="ml-2 text-xs text-slate-600">{layer.id}</span>
+                    <span className="ml-2 text-sm text-slate-600">
+                      {layer.id}
+                    </span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
                   {layer.visible ? (
                     <button
                       onClick={() => doOp("hide", { layer_id: layer.id })}
-                      className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                      className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
                       title="Hide"
                     >
                       <Eye className="h-4 w-4" />
@@ -217,7 +224,7 @@ export function LayerManager() {
                   ) : (
                     <button
                       onClick={() => doOp("show", { layer_id: layer.id })}
-                      className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                      className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
                       title="Show"
                     >
                       <EyeOff className="h-4 w-4" />
@@ -226,7 +233,7 @@ export function LayerManager() {
                   {layer.locked ? (
                     <button
                       onClick={() => doOp("unlock", { layer_id: layer.id })}
-                      className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                      className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
                       title="Unlock"
                     >
                       <Lock className="h-4 w-4" />
@@ -234,7 +241,7 @@ export function LayerManager() {
                   ) : (
                     <button
                       onClick={() => doOp("lock", { layer_id: layer.id })}
-                      className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+                      className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-300"
                       title="Lock"
                     >
                       <Unlock className="h-4 w-4" />

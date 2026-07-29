@@ -11,4 +11,4 @@ REPO_DIR := justfile_directory()
 
 # Scan repository for Unicode issues in logger/print calls
 emojibuster:
-    pwsh -NoProfile -File "{{REPO_DIR}}/scripts/just/emojibuster.ps1" -Path "{{REPO_DIR}}"
+    powershell.exe -NoProfile -File "{{REPO_DIR}}/scripts/just/emojibuster.ps1" -Path "{{REPO_DIR}}"

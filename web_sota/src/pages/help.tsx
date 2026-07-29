@@ -40,13 +40,14 @@ export function Help() {
   const [tab, setTab] = useState("overview");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="help-page">
       <div className="flex items-center gap-3">
         <HelpCircle className="h-6 w-6 text-blue-500" />
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Help</h2>
           <p className="text-sm text-slate-200">
-            Documentation served from the <code className="text-xs text-slate-500">docs/</code> directory
+            Documentation served from the{" "}
+            <code className="text-sm text-slate-400">docs/</code> directory
           </p>
         </div>
       </div>

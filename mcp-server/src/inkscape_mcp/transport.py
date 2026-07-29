@@ -152,7 +152,7 @@ def resolve_transport(args: argparse.Namespace) -> TransportType:
             logger.warning(
                 "SSE transport is deprecated. Consider using MCP_TRANSPORT=http instead."
             )
-        return env_transport  # type: ignore
+        return env_transport  # type: ignore[return-value]
 
 
 def resolve_config(args: argparse.Namespace) -> dict:
@@ -234,19 +234,12 @@ async def run_server_async(
             port = config["port"]
             path = config["path"]
             endpoint = f"http://{host}:{port}{path}"
-            logger.info(f"Running in HTTP Streamable mode: {endpoint}")
-            # Retry bind on E10048 (port still in TIME_WAIT after Rust free_port)
-            for retry in range(5):
-                try:
-                    await mcp_app.run_http_async(host=host, port=port, path=path)
-                    break
-                except OSError as exc:
-                    if retry < 4 and "10048" in str(exc):
-                        wait = 60
-                        logger.warning(f"Port {port} still occupied (E10048), retry {retry+1}/5 after {wait}s")
-                        await asyncio.sleep(wait)
-                        continue
-                    raise
+            logger.info(f"Running in HTTP mode: {endpoint}")
+            import uvicorn
+            asgi_app = mcp_app.http_app()
+            config_uv = uvicorn.Config(asgi_app, host=host, port=port, log_level="info")
+            server = uvicorn.Server(config_uv)
+            await server.serve()
 
         elif transport == "sse":
             host = config["host"]

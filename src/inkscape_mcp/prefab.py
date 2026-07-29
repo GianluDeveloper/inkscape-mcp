@@ -27,9 +27,9 @@ def register_prefabs(mcp: FastMCP) -> None:
         from fastmcp.prefab import prefab
     except ImportError:
         import logging
+
         logging.getLogger(__name__).warning(
-            "prefab-ui not installed — Prefab UI unavailable. "
-            "Run: uv add 'prefab-ui>=0.14.0'"
+            "prefab-ui not installed — Prefab UI unavailable. Run: uv add 'prefab-ui>=0.14.0'"
         )
         return
 
@@ -91,7 +91,14 @@ def register_prefabs(mcp: FastMCP) -> None:
                 Dropdown(
                     param="operation",
                     label="Operation",
-                    options=["status", "version", "diagnostics", "help", "config", "list_extensions"],
+                    options=[
+                        "status",
+                        "version",
+                        "diagnostics",
+                        "help",
+                        "config",
+                        "list_extensions",
+                    ],
                     default="status",
                 ),
                 Button(label="Run", action="submit"),

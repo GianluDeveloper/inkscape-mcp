@@ -14,7 +14,10 @@ export function LogModal({ open, onClose }: Props) {
   const fetchLogs = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE}/api/logs`);
-      if (!r.ok) { setLogs(`HTTP ${r.status}`); return; }
+      if (!r.ok) {
+        setLogs(`HTTP ${r.status}`);
+        return;
+      }
       const data = await r.json();
       setLogs(JSON.stringify(data, null, 2));
     } catch (e) {
@@ -27,7 +30,12 @@ export function LogModal({ open, onClose }: Props) {
   }, [open, fetchLogs]);
 
   return (
-    <Dialog.Root open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[90vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950 p-6 shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95">
@@ -36,7 +44,7 @@ export function LogModal({ open, onClose }: Props) {
             Server Logs
           </Dialog.Title>
 
-          <Dialog.Close className="absolute right-4 top-4 rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white">
+          <Dialog.Close className="absolute right-4 top-4 rounded-md p-1 text-slate-300 hover:bg-slate-800 hover:text-white">
             <X className="h-4 w-4" />
           </Dialog.Close>
 

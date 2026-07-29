@@ -76,6 +76,7 @@ Resources: resource://inkscape/capabilities, resource://inkscape/skills"""
     def resource_skills() -> str:
         """LLM-oriented skill reference loaded from skills/SKILL.md (CodeMode discovery)."""
         from pathlib import Path
+
         skill_path = Path(__file__).parent / "skills" / "SKILL.md"
         if skill_path.exists():
             return skill_path.read_text(encoding="utf-8")

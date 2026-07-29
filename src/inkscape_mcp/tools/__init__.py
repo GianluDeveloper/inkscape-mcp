@@ -12,6 +12,7 @@ TOOLS:
 - inkscape_system: System operations (status, help, diagnostics, version, config)
 """
 
+import logging
 from typing import Any
 
 from .analysis import inkscape_analysis
@@ -43,6 +44,15 @@ __all__ = [
     "register_heraldry_tools",
     "list_local_models",
 ]
+
+logger = logging.getLogger("inkscape-mcp.tools")
+
+
+def _error_response(error: str, error_type: str = "general", **kwargs) -> dict:
+    """Auto-logging error response — traceback logged before returning to caller."""
+    logger.exception("Tool error: %s [%s]", error, error_type)
+    return {"success": False, "error": error, "error_type": error_type, **kwargs}
+
 
 # Tool metadata for discovery
 PORTMANTEAU_TOOLS = [

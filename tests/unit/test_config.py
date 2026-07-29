@@ -7,8 +7,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-
-from inkscape_mcp.config import InkscapeConfig, load_config
+from inkscape_mcp.config import InkscapeConfig
+from inkscape_mcp.config import load_config
 
 
 class TestInkscapeConfig:

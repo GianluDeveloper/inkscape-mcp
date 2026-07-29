@@ -10,11 +10,7 @@ export function useZoom() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await (getCurrentWindow() as any).setZoom(level);
     } else {
-      const root = document.documentElement;
-      root.style.transform = `scale(${level})`;
-      root.style.transformOrigin = "top left";
-      root.style.width = `${100 / level}%`;
-      root.style.height = `${100 / level}%`;
+      document.documentElement.style.zoom = String(level);
     }
   }, []);
 
@@ -22,9 +18,14 @@ export function useZoom() {
     const handler = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      let idx = ZOOM_LEVELS.indexOf(parseFloat(localStorage.getItem("tauri-zoom") || "1"));
+      let idx = ZOOM_LEVELS.indexOf(
+        parseFloat(localStorage.getItem("tauri-zoom") || "1"),
+      );
       if (idx < 0) idx = 1;
-      const next = e.deltaY < 0 ? Math.min(idx + 1, ZOOM_LEVELS.length - 1) : Math.max(idx - 1, 0);
+      const next =
+        e.deltaY < 0
+          ? Math.min(idx + 1, ZOOM_LEVELS.length - 1)
+          : Math.max(idx - 1, 0);
       if (next !== idx) applyZoom(ZOOM_LEVELS[next]);
     };
     window.addEventListener("wheel", handler, { passive: false });

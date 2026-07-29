@@ -375,17 +375,18 @@ def silent_install(installer: str):
 # ── Phase 3: Launch ──────────────────────────────────────────────────
 
 def launch_app():
-    exe = os.path.join(INSTALL_DIR, OPERATOR_EXE)
-    if not os.path.exists(exe):
-        fatal(f"Operator not found at {exe}")
+    # Launch backend directly (Tauri native wrapper has WebView2 window
+    # creation issues in non-interactive sessions).
+    backend_exe = os.path.join(INSTALL_DIR, "resources", "inkscape-mcp-backend.exe")
+    if not os.path.exists(backend_exe):
+        fatal(f"Backend not found at {backend_exe}")
     env = os.environ.copy()
-    env_vars = cfg("env_vars", {})
-    if isinstance(env_vars, dict):
-        for k, v in env_vars.items():
-            env[k] = str(v)
-            log(f"  Set env {k}={v}")
-    subprocess.Popen([exe], cwd=INSTALL_DIR, env=env)
-    log(f"Launched {exe}")
+    env["MCP_PORT"] = str(BACKEND_PORT)
+    env["MCP_HOST"] = "127.0.0.1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env["INKSCAPE_TAURI"] = "1"
+    subprocess.Popen([backend_exe], cwd=os.path.join(INSTALL_DIR, "resources"), env=env)
+    log(f"Launched backend {backend_exe}")
     for attempt in range(MAX_RETRY):
         try:
             resp = urllib.request.urlopen(f"{BACKEND_URL}{HEALTH_PATH}", timeout=5)

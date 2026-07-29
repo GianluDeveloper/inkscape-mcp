@@ -2,29 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [ master, main, develop ]
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
-  pull_request:
-    branches: [ master, main, develop ]
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '*.md'
-      - '.github/ISSUE_TEMPLATE/**'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   # Quality Assurance Pipeline
   quality:
     name: Code Quality
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
 
     steps:
@@ -80,11 +65,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13']
         include:
           # Add coverage collection on Ubuntu with latest Python
-          - os: ubuntu-latest
+          - os: windows-latest
             python-version: '3.12'
             coverage: true
 
@@ -184,7 +169,7 @@ jobs:
   # Build and Package Pipeline
   build:
     name: Build & Package
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [quality, test]
     timeout-minutes: 10
 
@@ -223,7 +208,7 @@ jobs:
   # Integration Test Pipeline
   integration:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [build]
     timeout-minutes: 15
     if: github.event_name == 'pull_request'
@@ -266,7 +251,7 @@ jobs:
   # Performance Benchmarking
   benchmark:
     name: Performance Benchmarks
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [build]
     timeout-minutes: 10
     if: github.event_name == 'pull_request'
@@ -303,7 +288,7 @@ jobs:
   # Dependency Vulnerability Scan
   security:
     name: Security Scan
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
 
     steps:
@@ -336,7 +321,7 @@ jobs:
   # Documentation Build Check
   docs:
     name: Documentation
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 10
     if: github.event_name == 'pull_request'
 
@@ -366,7 +351,7 @@ jobs:
   # Docker Build Check
   docker:
     name: Docker Build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 15
     if: github.event_name == 'pull_request'
 
@@ -396,7 +381,7 @@ jobs:
   # Final Status Check
   ci-success:
     name: CI Success
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     needs: [quality, test, build, integration, benchmark, security, docs, docker]
     if: always()
     timeout-minutes: 5

@@ -4,7 +4,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Code2,
   FlaskConical,
+  Grid3X3,
   Layers,
   LayoutDashboard,
   ScrollText,
@@ -36,6 +38,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { href: "/layers", label: "Layers", icon: Layers },
     { href: "/logs", label: "Logs", icon: ScrollText },
     { href: "/chat", label: "Notes", icon: Bot },
+    { href: "/skills", label: "Skills", icon: Sparkles },
+    { href: "/apps", label: "Apps", icon: Grid3X3 },
+    { href: "/api-docs", label: "API Docs", icon: Code2 },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 
@@ -57,10 +62,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         </div>
         <button
           onClick={onToggle}
-          className="ml-auto flex items-center justify-center rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+          className="ml-auto flex items-center justify-center rounded-md p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <ChevronLeft className="h-4 w-4" />
+          )}
         </button>
       </div>
 
@@ -71,9 +80,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <Link
               key={item.href}
               to={item.href}
+              data-testid={`nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
               className={cn(
                 "group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-slate-800 hover:text-white",
-                isActive ? "bg-slate-800 text-white" : "text-slate-400",
+                isActive ? "bg-slate-800 text-white" : "text-slate-300",
                 collapsed ? "justify-center" : "justify-start",
               )}
             >

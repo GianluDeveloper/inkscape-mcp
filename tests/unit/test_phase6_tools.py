@@ -24,7 +24,8 @@ def icon_sources(tmp_path: Path) -> Path:
 
 class TestSvgPackPresets:
     def test_detect_svg_icons(self, icon_sources: Path):
-        from inkscape_mcp.utils.svg_pack_presets import detect_svg_icons, list_svg_pack_presets
+        from inkscape_mcp.utils.svg_pack_presets import detect_svg_icons
+        from inkscape_mcp.utils.svg_pack_presets import list_svg_pack_presets
 
         icons = detect_svg_icons(icon_sources)
         assert len(icons) == 3

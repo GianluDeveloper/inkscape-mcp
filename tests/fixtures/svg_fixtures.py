@@ -4,8 +4,6 @@ SVG test fixtures and data for testing.
 
 import tempfile
 from pathlib import Path
-from typing import Dict, List
-
 
 # Sample SVG content for testing
 SVG_FIXTURES = {
@@ -119,7 +117,7 @@ def create_temp_svg(content: str, suffix: str = ".svg") -> Path:
         raise
 
 
-def create_test_svgs() -> Dict[str, Path]:
+def create_test_svgs() -> dict[str, Path]:
     """Create temporary files for all SVG fixtures."""
     temp_files = {}
     for name, content in SVG_FIXTURES.items():
@@ -127,7 +125,7 @@ def create_test_svgs() -> Dict[str, Path]:
     return temp_files
 
 
-def cleanup_test_svgs(temp_files: Dict[str, Path]):
+def cleanup_test_svgs(temp_files: dict[str, Path]):
     """Clean up temporary SVG files."""
     for path in temp_files.values():
         path.unlink(missing_ok=True)
@@ -209,7 +207,7 @@ MOCK_INKSCAPE_RESPONSES = {
 }
 
 
-def get_mock_response(command_args: List[str]) -> str:
+def get_mock_response(command_args: list[str]) -> str:
     """Get mock response based on command arguments."""
     cmd_str = " ".join(command_args)
 

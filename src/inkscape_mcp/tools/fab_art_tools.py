@@ -220,9 +220,13 @@ async def inkscape_fab_art(
                     message="svg_path required",
                     error="svg_path required",
                 ).model_dump()
-            schematic = resolve_schematic_preset(preset_id) or resolve_schematic_preset("gazebo_model_doc_192")
+            schematic = resolve_schematic_preset(preset_id) or resolve_schematic_preset(
+                "gazebo_model_doc_192"
+            )
             use_dpi = dpi or (schematic["dpi"] if schematic else 192)
-            png_out = png_path or str(stage / "schematics" / f"{Path(svg_path).stem}_{use_dpi}dpi.png")
+            png_out = png_path or str(
+                stage / "schematics" / f"{Path(svg_path).stem}_{use_dpi}dpi.png"
+            )
             Path(png_out).parent.mkdir(parents=True, exist_ok=True)
 
             render = await inkscape_render(
@@ -242,7 +246,9 @@ async def inkscape_fab_art(
                     error=render.get("error", "RenderError"),
                 ).model_dump()
 
-            staged = await stage_file(source_path=png_out, staging_dir=stage, subdir="gazebo_schematics")
+            staged = await stage_file(
+                source_path=png_out, staging_dir=stage, subdir="gazebo_schematics"
+            )
             gimp_result = None
             if push_gimp:
                 gimp_result = await push_raster_to_gimp(
@@ -270,7 +276,9 @@ async def inkscape_fab_art(
         if operation == "stage_for_robotics":
             src_dir = Path(input_dir) if input_dir else stage / "dxf"
             if svg_path and Path(svg_path).is_file():
-                staged = await stage_file(source_path=svg_path, staging_dir=stage, subdir="robotics_staging")
+                staged = await stage_file(
+                    source_path=svg_path, staging_dir=stage, subdir="robotics_staging"
+                )
                 files = [staged.get("staged_path", "")]
             elif src_dir.is_dir():
                 dest = stage / "robotics_staging"
@@ -346,12 +354,18 @@ async def inkscape_fab_art(
                 cli_wrapper=cli_wrapper,
                 config=config,
             )
-            success = bool(dxf.get("success")) and schematic.get("success") and staged.get("success")
+            success = (
+                bool(dxf.get("success")) and schematic.get("success") and staged.get("success")
+            )
             return FabArtResult(
                 success=success,
                 operation=operation,
                 message="Fab pipeline complete" if success else "Fab pipeline partial failure",
-                data={"dxf": dxf, "schematic": schematic.get("data"), "robotics_stage": staged.get("data")},
+                data={
+                    "dxf": dxf,
+                    "schematic": schematic.get("data"),
+                    "robotics_stage": staged.get("data"),
+                },
                 files=(schematic.get("files") or []) + (staged.get("files") or []),
             ).model_dump()
 

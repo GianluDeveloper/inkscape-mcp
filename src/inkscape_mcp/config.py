@@ -223,7 +223,7 @@ class InkscapeConfig(BaseModel):
         path.parent.mkdir(parents=True, exist_ok=True)
 
         # Convert to dict and remove None values
-        config_dict = self.dict(exclude_none=True)
+        config_dict = self.model_dump(exclude_none=True)
 
         try:
             with Path(path).open("w", encoding="utf-8") as f:

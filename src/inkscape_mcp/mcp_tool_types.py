@@ -62,6 +62,7 @@ InkscapeSystemOperation = Literal[
     "execution_mode",
     "list_extensions",
     "execute_extension",
+    "self_terminate",
 ]
 
 InkscapeRenderOperation = Literal[

@@ -3,7 +3,7 @@
   "install_dir": "%LOCALAPPDATA%\\Inkscape MCP",
   "operator_exe": "inkscape-mcp-native.exe",
   "backend_process_names": ["inkscape-mcp-native", "inkscape-mcp-backend"],
-  "backend_port": 11028,
+  "backend_port": 11027,
   "health_path": "/api/health",
   "diagnostics_path": "/api/v1/diagnostics",
   "feature_smoke_path": "/api/v1/system/info",

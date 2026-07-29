@@ -564,7 +564,7 @@ class InkscapeMCPServer:
 
             PORTMANTEAU RATIONALE: Operational and introspection calls stay in one discoverable tool.
 
-            Operations: status, execution_mode, help, diagnostics, version, config, list_extensions, execute_extension.
+            Operations: status, execution_mode, help, diagnostics, version, config, list_extensions, execute_extension, self_terminate.
 
             Args:
                 operation: System subcommand (Literal). Extension execution may require extra
@@ -633,7 +633,7 @@ async def main_async():
     parser.add_argument(
         "--port",
         type=int,
-        default=11028,
+        default=11027,
         help="HTTP port when dual/http transport is used (fleet webapp backend; Vite proxies /mcp and /api here)",
     )
     parser.add_argument("--host", default="0.0.0.0")
@@ -708,7 +708,7 @@ def main():
     try:
         return asyncio.run(main_async())
     except Exception as e:
-        print(f"Unhandled error: {e}", file=sys.stderr)
+        logging.error("Unhandled error in main: %s", e, exc_info=True)
         return 1
 
 

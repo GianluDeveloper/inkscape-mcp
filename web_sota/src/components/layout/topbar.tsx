@@ -4,11 +4,11 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ExternalLink, HelpCircle, LayoutGrid, ScrollText } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APPS_CATALOG } from "@/common/apps-catalog";
-import API_BASE from "@/lib/api";
-import { useBackendStore } from "@/lib/store";
 import { HelpModal } from "@/components/modals/HelpModal";
 import { LogModal } from "@/components/modals/LogModal";
+import API_BASE from "@/lib/api";
 import { isTauri } from "@/lib/is-tauri";
+import { useBackendStore } from "@/lib/store";
 
 export function Topbar() {
   const online = useBackendStore((s) => s.online);
@@ -29,7 +29,9 @@ export function Topbar() {
   useEffect(() => {
     check();
     intervalRef.current = setInterval(check, 30_000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [check]);
 
   useEffect(() => {
@@ -41,48 +43,64 @@ export function Topbar() {
         setOnline(event.payload === "ready");
       });
     })();
-    return () => { if (unlisten) unlisten(); };
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, [setOnline]);
 
   const color = online === null ? "slate" : online ? "emerald" : "red";
-  const label = online === null ? "Connecting..." : online ? "System Online" : "Offline";
+  const label =
+    online === null ? "Connecting..." : online ? "System Online" : "Offline";
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-slate-800 bg-slate-950/50 px-6 backdrop-blur-xl">
       <div className="flex items-center gap-4">
-        <h1 className="text-sm font-medium text-slate-400">
+        <h1 className="text-sm font-medium text-slate-300">
           Navigation / <span className="text-slate-100">Control Center</span>
         </h1>
       </div>
 
       <div className="flex items-center gap-2">
         {/* System Status Indicator */}
-        <div className={`mr-4 flex items-center gap-2 rounded-full px-3 py-1 text-xs border ${color === "emerald" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : color === "red" ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-slate-500/10 text-slate-400 border-slate-500/20"}`}>
+        <div
+          className={`mr-4 flex items-center gap-2 rounded-full px-3 py-1 text-xs border ${color === "emerald" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : color === "red" ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-slate-500/10 text-slate-300 border-slate-500/20"}`}
+        >
           <span className="relative flex h-2 w-2">
             {online && (
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
             )}
-            <span className={`relative inline-flex h-2 w-2 rounded-full ${color === "emerald" ? "bg-emerald-500" : color === "red" ? "bg-red-500" : "bg-slate-500"}`}></span>
+            <span
+              className={`relative inline-flex h-2 w-2 rounded-full ${color === "emerald" ? "bg-emerald-500" : color === "red" ? "bg-red-500" : "bg-slate-500"}`}
+            ></span>
           </span>
           {label}
         </div>
 
         {/* Log viewer modal toggle */}
-        <button type="button" onClick={() => setLogsOpen(true)}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors">
+        <button
+          type="button"
+          onClick={() => setLogsOpen(true)}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+        >
           <ScrollText className="h-4 w-4" />
         </button>
 
         {/* Help modal toggle */}
-        <button type="button" onClick={() => setHelpOpen(true)}
-          className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors">
+        <button
+          type="button"
+          onClick={() => setHelpOpen(true)}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+        >
           <HelpCircle className="h-4 w-4" />
         </button>
 
         {/* Global Apps Navigation */}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button type="button" className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/50 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-700">
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-900/50 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-700"
+            >
               <LayoutGrid className="h-4 w-4" />
               Apps
             </button>
@@ -104,7 +122,9 @@ export function Topbar() {
                   >
                     <span className="text-base">{app.icon}</span>
                     <span>{app.label}</span>
-                    <span className="text-xs text-slate-600">{app.description}</span>
+                    <span className="text-xs text-slate-600">
+                      {app.description}
+                    </span>
                     <ExternalLink className="ml-auto h-3 w-3 opacity-50" />
                   </a>
                 </DropdownMenu.Item>

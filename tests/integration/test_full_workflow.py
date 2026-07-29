@@ -8,9 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from inkscape_mcp.tools import inkscape_file, inkscape_vector, inkscape_analysis, inkscape_system
-from inkscape_mcp.config import InkscapeConfig
 from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
+from inkscape_mcp.config import InkscapeConfig
+from inkscape_mcp.tools import inkscape_analysis
+from inkscape_mcp.tools import inkscape_file
+from inkscape_mcp.tools import inkscape_system
+from inkscape_mcp.tools import inkscape_vector
 
 
 @pytest.mark.integration
@@ -179,7 +182,7 @@ class TestPerformanceWorkflows:
 
         # Run multiple operations
         tasks = []
-        for i in range(3):
+        for _i in range(3):
             task = inkscape_analysis(
                 operation="objects",
                 input_path=str(svg_file),

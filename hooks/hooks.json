@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "text",
+            "text": "## Session Context (Inkscape MCP)\n\nYou have access to an Inkscape-backed MCP server for creating, editing, analyzing, and exporting vector graphics (SVG). 10 portmanteau tools with 70+ operations.\n\n**Before starting work:**\n1. Check Inkscape availability: inkscape_system(operation=\"status\")\n2. Set execution mode: inkscape_system(operation=\"execution_mode\")\n\n**At end of work, save the SVG:**\n- Export the final file: inkscape_file(operation=\"save\")\n- Or export a PNG preview: inkscape_render(operation=\"export_preview\")"
+          }
+        ]
+      }
+    ]
+  }
+}

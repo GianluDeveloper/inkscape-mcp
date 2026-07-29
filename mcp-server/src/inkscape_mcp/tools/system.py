@@ -252,8 +252,9 @@ async def inkscape_system(
         "config",
         "execution_mode",
         "hands_in_command",
-        "list_extensions",
-        "execute_extension",
+    "list_extensions",
+    "execute_extension",
+    "self_terminate",
     ],
     extension_id: str | None = None,
     _extension_params: dict[str, Any] | None = None,
@@ -460,7 +461,7 @@ async def inkscape_system(
                     "inkscape_vector: Advanced vector operations (trace, boolean, optimize, render_preview, etc.)",
                     "inkscape_render: Agent vision exports (export_preview, export_multi_dpi, get_document_summary)",
                     "inkscape_analysis: Document analysis (quality, statistics, validate, objects, dimensions, structure)",
-                    "inkscape_system: System operations (status, execution_mode, help, diagnostics, version, config)",
+                    "inkscape_system: System operations (status, execution_mode, help, diagnostics, version, config, self_terminate)",
                 ],
                 "getting_started": [
                     "Ensure Inkscape 1.0+ is installed",
@@ -477,6 +478,11 @@ async def inkscape_system(
                 data=help_info,
                 execution_time_ms=(time.time() - start_time) * 1000,
             ).model_dump()
+
+        elif operation == "self_terminate":
+            import os
+            logger.warning("Self-termination requested by agent")
+            os._exit(0)
 
         elif operation == "config":
             # View configuration

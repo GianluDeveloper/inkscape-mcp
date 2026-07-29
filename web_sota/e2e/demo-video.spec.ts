@@ -1,6 +1,9 @@
 import { test } from "@playwright/test";
 import path from "path";
+import { fileURLToPath } from "url";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const VIDEO_DIR = path.resolve(__dirname, "../../docs/screenshots");
 
 test.describe("Video demo walkthrough", () => {
@@ -49,6 +52,8 @@ test.describe("Video demo walkthrough", () => {
     await page.waitForSelector("text=Server status");
     await page.waitForTimeout(1000);
 
-    await context.tracing.stop({ path: path.join(VIDEO_DIR, "demo-trace.zip") });
+    await context.tracing.stop({
+      path: path.join(VIDEO_DIR, "demo-trace.zip"),
+    });
   });
 });

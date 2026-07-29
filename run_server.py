@@ -10,14 +10,17 @@ import sys
 _DBG = r"C:\Users\sandr\AppData\Local\ai.fleet.inkscape-mcp\run_server_debug.log"
 try:
     with open(_DBG, "a") as f:
-        f.write(f"run_server.py started at {__import__('datetime').datetime.now()}\n")
+        f.write(f"\n=== run_server.py started PID={os.getpid()} at {__import__('datetime').datetime.now()} ===\n")
         f.write(f"  CWD: {os.getcwd()}\n")
         f.write(f"  MCP_PORT: {os.environ.get('MCP_PORT', '(unset)')}\n")
         f.write(f"  MCP_HOST: {os.environ.get('MCP_HOST', '(unset)')}\n")
         f.write(f"  INKSCAPE_TAURI: {os.environ.get('INKSCAPE_TAURI', '(unset)')}\n")
         f.write(f"  sys.argv: {sys.argv}\n")
+        f.flush()
 except Exception as exc:
-    pass  # Can't log early — file may not be writable
+    with open(r"C:\Users\sandr\AppData\Local\ai.fleet.inkscape-mcp\run_server_crash.log", "a") as cf:
+        cf.write(f"run_server.py PID={os.getpid()} debug log ERROR: {exc}\n")
+        cf.flush()
 
 sys.path.insert(0, "src")
 

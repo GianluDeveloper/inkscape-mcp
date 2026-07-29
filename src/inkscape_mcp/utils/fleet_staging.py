@@ -19,7 +19,12 @@ def list_staging_files(staging_dir: Path, *, subdir: str = "") -> dict[str, Any]
     if not root.is_dir():
         return {"success": True, "files": [], "staging_dir": str(staging_dir)}
     files = sorted(str(p) for p in root.rglob("*") if p.is_file())
-    return {"success": True, "files": files, "staging_dir": str(staging_dir), "scan_root": str(root)}
+    return {
+        "success": True,
+        "files": files,
+        "staging_dir": str(staging_dir),
+        "scan_root": str(root),
+    }
 
 
 async def stage_file(

@@ -3,16 +3,15 @@ Unit tests for Inkscape CLI wrapper module.
 """
 
 import asyncio
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
 
-from inkscape_mcp.cli_wrapper import (
-    InkscapeCliWrapper,
-    InkscapeCliError,
-    InkscapeTimeoutError,
-    InkscapeExecutionError,
-)
+from inkscape_mcp.cli_wrapper import InkscapeCliError
+from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
+from inkscape_mcp.cli_wrapper import InkscapeExecutionError
+from inkscape_mcp.cli_wrapper import InkscapeTimeoutError
 
 
 class TestInkscapeCliWrapper:
