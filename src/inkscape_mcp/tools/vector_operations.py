@@ -394,10 +394,55 @@ async def inkscape_vector(
     operation_type: str = "",
     cli_wrapper: Any = None,
     config: Any = None,
-    **kwargs,
+    # Optional per-operation params (FastMCP 3.x rejects **kwargs on tools,
+    # so these are explicit; each applies only to the operation that uses it).
+    barcode_data: str = "",
+    preset_id: str = "",
+    x: int = 300,
+    y: int = 200,
+    threshold: float = 1.0,
+    dpi: int = 96,
+    units: str = "px",
+    shape: str = "rect",
+    params: dict[str, Any] | None = None,
+    element_type: str = "",
+    direction: str = "inset",
+    amount: float = 2.0,
+    output_dir: str = "",
+    lpe_id: str = "",
+    text: str = "",
+    font_family: str = "",
+    font_size: float = 0,
+    font_weight: str = "",
+    fill: str = "",
+    text_anchor: str = "",
 ) -> dict[str, Any]:
     """Inkscape vector operations portmanteau tool."""
     start_time = time.time()
+
+    # Pass-through dict for the shared LPE/text handlers (kept as dict internally).
+    kwargs = {
+        "barcode_data": barcode_data,
+        "preset_id": preset_id,
+        "x": x,
+        "y": y,
+        "threshold": threshold,
+        "dpi": dpi,
+        "units": units,
+        "shape": shape,
+        "params": params or {},
+        "element_type": element_type,
+        "direction": direction,
+        "amount": amount,
+        "output_dir": output_dir,
+        "lpe_id": lpe_id,
+        "text": text,
+        "font_family": font_family,
+        "font_size": font_size,
+        "font_weight": font_weight,
+        "fill": fill,
+        "text_anchor": text_anchor,
+    }
 
     try:
         if operation == "trace_image":
@@ -405,13 +450,12 @@ async def inkscape_vector(
 
         elif operation == "generate_barcode_qr":
             return await _generate_barcode_qr(
-                kwargs.get("barcode_data", ""), output_path, cli_wrapper, config
+                barcode_data, output_path, cli_wrapper, config
             )
 
         elif operation == "generate_laser_dot":
-            preset_id = kwargs.get("preset_id", "")
-            dot_x = kwargs.get("x", 300)
-            dot_y = kwargs.get("y", 200)
+            dot_x = x
+            dot_y = y
             if preset_id:
                 from ..utils.fab_art_presets import resolve_laser_preset
 
@@ -440,7 +484,7 @@ async def inkscape_vector(
                 input_path,
                 output_path,
                 object_id,
-                kwargs.get("threshold", 1.0),
+                threshold,
                 cli_wrapper,
                 config,
             )
@@ -450,7 +494,7 @@ async def inkscape_vector(
 
         elif operation == "render_preview":
             return await _render_preview(
-                input_path, output_path, kwargs.get("dpi", 96), cli_wrapper, config
+                input_path, output_path, dpi, cli_wrapper, config
             )
 
         elif operation == "export_dxf":
@@ -469,14 +513,14 @@ async def inkscape_vector(
 
         elif operation == "set_document_units":
             return await _set_document_units(
-                input_path, output_path, kwargs.get("units", "px"), cli_wrapper, config
+                input_path, output_path, units, cli_wrapper, config
             )
 
         elif operation == "create_object":
             return await _create_object(
                 output_path,
-                kwargs.get("shape", "rect"),
-                kwargs.get("params", {}),
+                shape,
+                params or {},
                 cli_wrapper,
                 config,
             )
@@ -486,15 +530,15 @@ async def inkscape_vector(
 
         elif operation == "construct_svg":
             return await _construct_svg(
-                output_path, kwargs.get("element_type", ""), kwargs.get("params", {}), config
+                output_path, element_type, params or {}, config
             )
 
         elif operation == "path_inset_outset":
             return await _path_inset_outset(
                 input_path,
                 output_path,
-                kwargs.get("direction", "inset"),
-                kwargs.get("amount", 2.0),
+                direction,
+                amount,
                 cli_wrapper,
                 config,
             )
@@ -529,7 +573,7 @@ async def inkscape_vector(
 
         elif operation == "layers_to_files":
             return await _layers_to_files(
-                input_path, output_path, kwargs.get("output_dir", ""), cli_wrapper, config
+                input_path, output_path, output_dir, cli_wrapper, config
             )
 
         else:

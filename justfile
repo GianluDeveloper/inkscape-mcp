@@ -1,13 +1,13 @@
 set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
 import 'scripts/just/fleet.just'
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# --- Dashboard ---
 
 # Open the interactive recipe dashboard in the browser
 default:
     @just --list
 
-# ── Quality ───────────────────────────────────────────────────────────────────
+# --- Quality ---
 
 # Execute Ruff SOTA v13.1 linting
 lint:
@@ -34,7 +34,7 @@ typecheck:
 check: lint typecheck test
     @echo check complete
 
-# ── Hardening ─────────────────────────────────────────────────────────────────
+# --- Hardening ---
 
 # Execute Bandit security audit
 check-sec:
@@ -44,7 +44,7 @@ check-sec:
 audit-deps:
     uv run safety check
 
-# ── Operation ─────────────────────────────────────────────────────────────────
+# --- Operation ---
 
 # Launch Inkscape MCP (HTTP mode)
 serve port="11027":
@@ -70,7 +70,7 @@ run-stdio:
 run-http port="11028":
     uv run inkscape-mcp --mode http --port {{port}}
 
-# ── Packaging ─────────────────────────────────────────────────────────────────
+# --- Packaging ---
 
 # Sync MCPB source artifacts
 sync-mcpb-src:
@@ -88,13 +88,13 @@ mcpb-pack: sync-mcpb-src expand-mcpb-examples
 build-wheel:
     uv build
 
-# ── Housekeeping ──────────────────────────────────────────────────────────────
+# --- Housekeeping ---
 
 # Execute pre-commit checks on all files
 pre-commit:
 	uv run pre-commit run --all-files
 
-# ── Tauri NSIS ─────────────────────────────────────────────────────────────────
+# --- Tauri NSIS ---
 
 # Build the PyInstaller backend .exe (step before Tauri build)
 build-sidecar:
@@ -106,7 +106,7 @@ build-native:
     Set-Location '{{justfile_directory()}}\native'
     powershell.exe -NoProfile -File .\build.ps1
 
-# ── Playwright E2E ─────────────────────────────────────────────────────
+# --- Playwright E2E ---
 
 # Install Playwright browsers (one-time)
 e2e-install:
@@ -118,7 +118,7 @@ e2e:
     Set-Location '{{justfile_directory()}}\web_sota'
     npx playwright test
 
-# ── Demo Capture ─────────────────────────────────────────────────────────
+# --- Demo Capture ---
 
 # Capture screenshots of all webapp pages
 capture-screenshots:
@@ -132,3 +132,13 @@ capture-video:
 capture: capture-screenshots capture-video
     @echo Demo materials saved to docs/screenshots/
 
+
+# Bootstrap: install dev deps + pre-commit hook
+bootstrap:
+    uv sync --group dev
+    uv run pre-commit install
+    Write-Host "Pre-commit hooks installed." -ForegroundColor Green
+
+# Run CUA-NSIS smoke test (install -> launch -> nav walk -> uninstall)
+cua-nsis-test:
+    powershell.exe -NoProfile -File "{{justfile_directory()}}\scripts\just\cua-nsis-test.ps1"

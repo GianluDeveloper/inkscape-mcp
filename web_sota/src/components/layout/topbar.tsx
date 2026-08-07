@@ -1,7 +1,7 @@
 "use client";
 
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ExternalLink, HelpCircle, LayoutGrid, ScrollText } from "lucide-react";
+import { ExternalLink, HelpCircle, LayoutGrid, Moon, ScrollText, Sun } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APPS_CATALOG } from "@/common/apps-catalog";
 import { HelpModal } from "@/components/modals/HelpModal";
@@ -10,12 +10,39 @@ import API_BASE from "@/lib/api";
 import { isTauri } from "@/lib/is-tauri";
 import { useBackendStore } from "@/lib/store";
 
+// EXPERIMENTAL light mode (invert hack). Not fleet standard — see index.css.
+// Toggling `.dark` off the root flips the invert filter; persisted so the
+// choice survives reloads. Delete this + the CSS block to revert.
+const THEME_KEY = "inkscape-light-mode";
+
+function useExperimentalTheme() {
+  const [light, setLight] = useState(() => {
+    try {
+      return localStorage.getItem(THEME_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", !light);
+    try {
+      localStorage.setItem(THEME_KEY, light ? "1" : "0");
+    } catch {
+      // ignore storage errors
+    }
+  }, [light]);
+
+  return { light, toggle: () => setLight((v) => !v) };
+}
+
 export function Topbar() {
   const online = useBackendStore((s) => s.online);
   const setOnline = useBackendStore((s) => s.setOnline);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const { light, toggle } = useExperimentalTheme();
 
   const check = useCallback(async () => {
     try {
@@ -61,6 +88,17 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Day mode toggle */}
+        <button
+          type="button"
+          onClick={toggle}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-slate-800 bg-slate-900/50 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+          title={light ? "Switch to dark (experimental light mode)" : "Switch to light (experimental, ugly)"}
+          aria-label="Toggle light mode (experimental)"
+        >
+          {light ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </button>
+
         {/* System Status Indicator */}
         <div
           className={`mr-4 flex items-center gap-2 rounded-full px-3 py-1 text-xs border ${color === "emerald" ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : color === "red" ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-slate-500/10 text-slate-300 border-slate-500/20"}`}
