@@ -639,13 +639,12 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         # Build tool list and group by category
         tool_list: list[str] = []
         tool_count = 0
-        if hasattr(mcp, "_tool_manager"):
-            try:
-                raw_tools = mcp._tool_manager.list_tools()
-                tool_list = [t.name for t in raw_tools]
-                tool_count = len(tool_list)
-            except Exception:
-                pass
+        try:
+            raw_tools = await mcp.list_tools()
+            tool_list = [t.name for t in raw_tools]
+            tool_count = len(tool_list)
+        except Exception:
+            pass
 
         tool_groups: list[dict[str, Any]] = []
         try:
@@ -689,11 +688,10 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     @app.get("/api/v1/diagnostics")
     async def diagnostics() -> dict:
         tools = []
-        if hasattr(mcp, "_tool_manager"):
-            try:
-                tools = [{"name": t.name} for t in mcp._tool_manager.list_tools()]
-            except Exception:
-                pass
+        try:
+            tools = [{"name": t.name} for t in await mcp.list_tools()]
+        except Exception:
+            pass
         return {
             "status": "ok",
             "server": "inkscape-mcp",
