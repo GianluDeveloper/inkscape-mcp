@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "inkscape-mcp"
 version = "2.6.0"
-description = "MCP server for Inkscape-backed SVG and vector operations (FastMCP 3.2.0+)"
+description = "Inkscape-powered SVG and vector automation: edit, convert, trace, render, fleet handoff"
 readme = "README.md"
 authors = [
     {name = "Sandra Schipal", email = "sandraschipal@gmail.com"},
