@@ -80,8 +80,9 @@ sync-mcpb-src:
 expand-mcpb-examples:
     uv run python tools/expand_mcpb_examples.py
 
-# Build MCPB bundle
-mcpb-pack: sync-mcpb-src expand-mcpb-examples
+# Build MCPB bundle, full custom pipeline (sync + expand examples + pack).
+# Named -full: plain `mcpb-pack` is fleet.just (mcpb/pack.ps1).
+mcpb-pack-full: sync-mcpb-src expand-mcpb-examples
     uv run python tools/pack_mcpb.py
 
 # Build wheel package
@@ -139,6 +140,4 @@ bootstrap:
     uv run pre-commit install
     Write-Host "Pre-commit hooks installed." -ForegroundColor Green
 
-# Run CUA-NSIS smoke test (install -> launch -> nav walk -> uninstall)
-cua-nsis-test:
-    powershell.exe -NoProfile -File "{{justfile_directory()}}\scripts\just\cua-nsis-test.ps1"
+# CUA tests via fleet.just (`just cua-nsis-test` / `just cua-webapp-test`)
