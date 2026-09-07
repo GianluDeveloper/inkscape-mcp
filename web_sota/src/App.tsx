@@ -11,7 +11,7 @@ import { Actions } from "@/pages/actions";
 import { AgentTools } from "@/pages/agent-tools";
 import { AnimationStudio } from "@/pages/animation";
 import { ApiDocs } from "@/pages/api-docs";
-import { Apps } from "@/pages/apps";
+import { AppsPage as Apps } from "@/pages/apps";
 import { Chat } from "@/pages/chat";
 import { Dashboard } from "@/pages/dashboard";
 import { Help } from "@/pages/help";

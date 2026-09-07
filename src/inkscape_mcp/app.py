@@ -33,6 +33,7 @@ from typing import Any
 
 try:
     import httpx
+    from fastapi import APIRouter
     from fastapi import FastAPI
     from fastapi import Request
     from fastapi.middleware.cors import CORSMiddleware
@@ -534,6 +535,12 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     )
 
     _attach_memory_logging()
+
+    from .services.apps_routes import register_apps_routes
+
+    _apps_router = APIRouter(prefix="/api")
+    register_apps_routes(_apps_router)
+    app.include_router(_apps_router)
 
     @app.get("/api/logs")
     async def api_logs(
