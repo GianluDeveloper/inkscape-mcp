@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="500"
+   height="500"
+   viewBox="0 0 500 500"
+   version="1.1"
+   id="svg_layered_art"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns="http://www.w3.org/2000/svg">
+  <defs id="defs_art">
+    <linearGradient id="sky_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" style="stop-color:#020617;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E1B4B;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="moon_glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" style="stop-color:#FDF4FF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#E879F9;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#A855F7;stop-opacity:0" />
+    </radialGradient>
+  </defs>
+
+  <!-- LAYER 1: Background Sky -->
+  <g inkscape:groupmode="layer" id="layer_sky" inkscape:label="Background Sky">
+    <rect width="500" height="500" fill="url(#sky_grad)" id="rect_sky" />
+    <circle cx="380" cy="120" r="90" fill="url(#moon_glow)" id="moon_glow_circle" />
+    <circle cx="380" cy="120" r="45" fill="#FAF5FF" id="moon_body" />
+    <!-- Stars -->
+    <circle cx="100" cy="80" r="2" fill="#FFFFFF" opacity="0.8" id="star1" />
+    <circle cx="220" cy="60" r="1.5" fill="#FFFFFF" opacity="0.9" id="star2" />
+    <circle cx="160" cy="140" r="2.5" fill="#FFFFFF" opacity="0.7" id="star3" />
+    <circle cx="290" cy="110" r="1.8" fill="#FFFFFF" opacity="0.9" id="star4" />
+  </g>
+
+  <!-- LAYER 2: Far Mountains -->
+  <g inkscape:groupmode="layer" id="layer_far_mountains" inkscape:label="Far Mountains">
+    <path id="mountains_back" d="M 0,500 L 0,320 L 90,240 L 180,310 L 290,210 L 410,340 L 500,280 L 500,500 Z" fill="#312E81" />
+  </g>
+
+  <!-- LAYER 3: Midground Hills & Trees -->
+  <g inkscape:groupmode="layer" id="layer_midground" inkscape:label="Midground Hills">
+    <path id="hills_mid" d="M 0,500 L 0,380 C 120,340 220,410 320,370 C 400,340 460,380 500,360 L 500,500 Z" fill="#1E1B4B" />
+    <polygon id="tree_far_1" points="120,360 105,400 135,400" fill="#0F172A" />
+    <polygon id="tree_far_2" points="140,350 128,390 152,390" fill="#0F172A" />
+    <polygon id="tree_far_3" points="340,365 328,405 352,405" fill="#0F172A" />
+  </g>
+
+  <!-- LAYER 4: Foreground Ridge & Silhouette -->
+  <g inkscape:groupmode="layer" id="layer_foreground" inkscape:label="Foreground Silhouette">
+    <path id="ridge_front" d="M 0,500 L 0,440 C 150,420 280,480 500,430 L 500,500 Z" fill="#020617" />
+    <g id="group_cabin" transform="translate(80, 390)">
+      <polygon points="40,0 0,30 80,30" fill="#020617" id="cabin_roof" />
+      <rect x="10" y="30" width="60" height="40" fill="#020617" id="cabin_walls" />
+      <rect x="30" y="40" width="15" height="18" fill="#FDE047" id="cabin_window_glow" />
+    </g>
+    <polygon id="tree_front_1" points="400,350 375,440 425,440" fill="#020617" />
+    <polygon id="tree_front_2" points="440,370 420,450 460,450" fill="#020617" />
+  </g>
+</svg>

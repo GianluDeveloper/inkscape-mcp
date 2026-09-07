@@ -170,3 +170,6 @@ logs/
 config.local.yaml
 config.local.yml
 _dashboard/
+
+# Quality-check reports (local, not committed)
+reports/

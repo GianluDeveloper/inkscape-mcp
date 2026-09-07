@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="500"
+   height="300"
+   viewBox="0 0 500 300"
+   version="1.1"
+   id="svg_laser_template"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns="http://www.w3.org/2000/svg">
+  <!-- 
+    LASER CUTTING SPECIFICATION:
+    - Stroke #FF0000 (Red) stroke-width="0.5" -> VECTOR CUT LINE
+    - Stroke #0000FF (Blue) stroke-width="0.5" -> VECTOR ENGRAVE LINE
+    - Fill #000000 (Black) -> RASTER ENGRAVE REGION
+  -->
+  <g inkscape:groupmode="layer" id="layer_laser_engrave" inkscape:label="Engrave Fills">
+    <rect x="50" y="40" width="400" height="220" rx="15" fill="#F8FAFC" id="plate_base" />
+    <text x="250" y="100" font-family="Courier New, monospace" font-size="22" font-weight="bold" fill="#000000" text-anchor="middle" id="text_engrave_heading">LASER CUT &amp; ENGRAVE</text>
+    <rect x="150" y="120" width="200" height="40" rx="4" fill="#000000" id="rect_black_engrave" />
+    <text x="250" y="146" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#FFFFFF" text-anchor="middle" id="text_white_invert">FABRICATION TEST</text>
+  </g>
+
+  <g inkscape:groupmode="layer" id="layer_laser_scoring" inkscape:label="Vector Scoring">
+    <!-- Blue lines for vector score/engrave -->
+    <path id="score_line_1" d="M 70,180 H 430" stroke="#0000FF" stroke-width="0.75" fill="none" />
+    <path id="score_line_2" d="M 70,190 H 430" stroke="#0000FF" stroke-width="0.75" stroke-dasharray="4,4" fill="none" />
+  </g>
+
+  <g inkscape:groupmode="layer" id="layer_laser_cuts" inkscape:label="Cut Paths">
+    <!-- Outer boundary vector cut (Red) -->
+    <rect x="50" y="40" width="400" height="220" rx="15" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_outer_boundary" />
+    
+    <!-- Mounting Holes (Red Cuts) -->
+    <circle cx="80" cy="70" r="8" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_hole_tl" />
+    <circle cx="420" cy="70" r="8" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_hole_tr" />
+    <circle cx="80" cy="230" r="8" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_hole_bl" />
+    <circle cx="420" cy="230" r="8" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_hole_br" />
+
+    <!-- Slot cut out (Red) -->
+    <rect x="180" y="210" width="140" height="15" rx="3" fill="none" stroke="#FF0000" stroke-width="0.5" id="cut_slot_center" />
+  </g>
+
+  <g inkscape:groupmode="layer" id="layer_alignment" inkscape:label="Registration Marks">
+    <!-- Corner Crosshairs -->
+    <path d="M 20,20 V 40 M 20,20 H 40" stroke="#94A3B8" stroke-width="1" id="mark_tl" />
+    <path d="M 480,20 V 40 M 480,20 H 460" stroke="#94A3B8" stroke-width="1" id="mark_tr" />
+  </g>
+</svg>

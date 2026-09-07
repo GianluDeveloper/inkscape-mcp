@@ -38,7 +38,7 @@ if ($BackendOnly) { return }
 
 # Start frontend
 $WebRoot = Join-Path $ScriptRoot "web_sota"
-Start-Process -NoNewWindow -FilePath "npx" -ArgumentList "vite --port $FrontendPort --host" -WorkingDirectory $WebRoot
+Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c","npx vite --port $FrontendPort --host" -WorkingDirectory $WebRoot
 
 Write-Host "Frontend starting on http://127.0.0.1:$FrontendPort" -ForegroundColor Green
 

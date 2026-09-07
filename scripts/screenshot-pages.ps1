@@ -26,7 +26,7 @@ if (-not $be) {
 $fe = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
 if (-not $fe) {
     Write-Host "Starting frontend..." -ForegroundColor Yellow
-    $feJob = Start-Process -NoNewWindow -FilePath "npx" -ArgumentList "vite --port $FrontendPort --host" -WorkingDirectory (Join-Path $Root "web_sota")
+    $feJob = Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c","npx vite --port $FrontendPort --host" -WorkingDirectory (Join-Path $Root "web_sota")
     Start-Sleep -Seconds 8
 }
 

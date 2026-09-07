@@ -36,7 +36,7 @@ for ($i = 0; $i -lt 30; $i++) {
 
 # Start frontend
 $feDir = Join-Path $Root "web_sota"
-$feProc = Start-Process -NoNewWindow -FilePath "npx" -ArgumentList "vite --port $FrontendPort --host" -WorkingDirectory $feDir -PassThru
+$feProc = Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c","npx vite --port $FrontendPort --host" -WorkingDirectory $feDir -PassThru
 Start-Sleep -Seconds 10
 
 Write-Host "Frontend ready at http://127.0.0.1:$FrontendPort" -ForegroundColor Green
