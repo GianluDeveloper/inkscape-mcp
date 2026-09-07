@@ -25,6 +25,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC
 from datetime import datetime
@@ -494,6 +495,89 @@ async def _save_via_inkscape(svg_xml: str, stem: str, inkscape_exe: str | None) 
         return None
 
 
+async def _call_mcp_tool(mcp: Any, tool_name: str, params: dict) -> dict[str, Any]:
+    """Call an MCP tool and normalize FastMCP's ToolResult into
+    {success, data, error} - shared by /v1/tool and the agentic chat
+    tool-calling loop so there is exactly one place that understands
+    to_mcp_result()'s three possible shapes.
+
+    result.to_mcp_result() returns one of:
+      - a CallToolResult (has .isError) - the only shape that actually
+        carries an error flag.
+      - a (content, structured_content) tuple - NEVER an error path per
+        FastMCP's ToolResult.to_mcp_result(); structured_content is a
+        dict, not a bool, so it must never be read as an is_error flag
+        (a truthy dict would always look like an error - this was a real
+        bug here before: every successful tool call with data reported
+        as failed).
+      - a bare content list.
+    """
+    try:
+        result = await mcp.call_tool(str(tool_name), params)
+    except Exception as exc:
+        logger.exception("Tool %s failed: %s", tool_name, exc)
+        return {"success": False, "data": None, "error": str(exc)}
+
+    mcp_result = result.to_mcp_result()
+    is_error = False
+    content_list: list[Any] = []
+    structured_content: Any = None
+    if hasattr(mcp_result, "isError"):
+        is_error = bool(mcp_result.isError)
+        content_list = getattr(mcp_result, "content", None) or []
+        structured_content = getattr(mcp_result, "structuredContent", None)
+    elif isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
+        content_list, structured_content = mcp_result[0], mcp_result[1]
+    else:
+        content_list = mcp_result if isinstance(mcp_result, list) else getattr(result, "content", [])
+
+    data: Any = structured_content
+    error_text: str | None = None
+    if content_list:
+        text = getattr(content_list[0], "text", str(content_list[0]))
+        if data is None:
+            try:
+                data = json.loads(text)
+            except Exception:
+                data = {"output": text}
+        if is_error:
+            error_text = text
+
+    return {
+        "success": not is_error and data is not None,
+        "data": data,
+        "error": None if not is_error else (error_text or "Tool returned error"),
+    }
+
+
+async def _ollama_tool_schemas(mcp: Any) -> list[dict[str, Any]]:
+    """Ollama-format (OpenAI-style) function-tool schemas for every
+    registered MCP tool, so the chat tool-calling loop and MCP clients
+    expose the same surface - reuses list_tools(), the same call /api/health
+    already makes for its tool_count."""
+    try:
+        raw_tools = await mcp.list_tools()
+    except Exception:
+        logger.warning("list_tools() failed while building chat tool schemas", exc_info=True)
+        return []
+    schemas: list[dict[str, Any]] = []
+    for t in raw_tools:
+        try:
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": (t.description or "")[:1000],
+                        "parameters": t.parameters,
+                    },
+                }
+            )
+        except Exception:
+            continue
+    return schemas
+
+
 # ── Streaming chat helpers ────────────────────────────────────────────────────
 
 
@@ -507,12 +591,24 @@ class _AgenticEvent:
 
 
 async def _stream_ollama_raw(
-    client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
-) -> AsyncGenerator[str, None]:
+    client: httpx.AsyncClient,
+    endpoint: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yields ("text", chunk) for content deltas, or ("tool_calls", list)
+    once when the model wants to call tools instead of answering. Ollama
+    delivers tool_calls on the final streamed line (done=true), not
+    incrementally piece by piece the way OpenAI-style deltas work - so this
+    stops yielding text and returns as soon as a line carries them."""
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
     async with client.stream(
         "POST",
         f"{endpoint}/api/chat",
-        json={"model": model, "messages": messages, "stream": True},
+        json=payload,
         timeout=120,
     ) as r:
         async for line in r.aiter_lines():
@@ -520,16 +616,24 @@ async def _stream_ollama_raw(
                 continue
             try:
                 data = json.loads(line)
-                chunk = data.get("message", {}).get("content", "")
-                if chunk:
-                    yield chunk
             except json.JSONDecodeError:
-                pass
+                continue
+            msg = data.get("message") or {}
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                yield ("tool_calls", tool_calls)
+                return
+            chunk = msg.get("content", "")
+            if chunk:
+                yield ("text", chunk)
 
 
 async def _stream_lmstudio_raw(
     client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yields ("text", chunk) tuples - same tagged shape as
+    _stream_ollama_raw for a uniform caller, though LM Studio never yields
+    ("tool_calls", ...): tool calling is Ollama-only here (see _event_stream)."""
     async with client.stream(
         "POST",
         f"{endpoint}/v1/chat/completions",
@@ -546,7 +650,7 @@ async def _stream_lmstudio_raw(
                 data = json.loads(chunk)
                 delta = data["choices"][0].get("delta", {}).get("content", "")
                 if delta:
-                    yield delta
+                    yield ("text", delta)
             except json.JSONDecodeError:
                 pass
 
@@ -737,14 +841,81 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                     text = f"{provider} request failed: {exc}"
                 yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': text})}\n\n"
             else:
+                # Agentic tool-calling loop (Ollama only - it's the only
+                # provider here whose streaming API surfaces tool_calls;
+                # LM Studio's OpenAI-style streaming would need incremental
+                # partial-JSON delta assembly across chunks, a materially
+                # different and harder problem, not implemented). This is
+                # what chat.tsx's tool_call/tool_result SSE handling and its
+                # tool-call cards were originally built for but never
+                # received - _AgenticEvent.TOOL_CALL was defined and the
+                # frontend UI built around it, but nothing server-side ever
+                # yielded one.
+                tools_schema = await _ollama_tool_schemas(mcp) if provider == "ollama" else None
+                max_rounds = 4
                 async with httpx.AsyncClient(timeout=120.0) as client:
-                    if provider == "lmstudio":
-                        generator = _stream_lmstudio_raw(client, endpoint, model, msgs)
-                    else:
-                        generator = _stream_ollama_raw(client, endpoint, model, msgs)
+                    for _round in range(max_rounds):
+                        pending_tool_calls: list[dict] | None = None
+                        generator = (
+                            _stream_lmstudio_raw(client, endpoint, model, msgs)
+                            if provider == "lmstudio"
+                            else _stream_ollama_raw(client, endpoint, model, msgs, tools=tools_schema or None)
+                        )
+                        async for kind, item in generator:
+                            if kind == "text":
+                                yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': item})}\n\n"
+                            elif kind == "tool_calls":
+                                pending_tool_calls = item
 
-                    async for chunk in generator:
-                        yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': chunk})}\n\n"
+                        if not pending_tool_calls:
+                            break
+
+                        msgs.append({"role": "assistant", "content": "", "tool_calls": pending_tool_calls})
+                        for tc in pending_tool_calls:
+                            fn = (tc or {}).get("function") or {}
+                            tool_name = str(fn.get("name") or "")
+                            raw_args = fn.get("arguments")
+                            if isinstance(raw_args, str):
+                                try:
+                                    args = json.loads(raw_args) if raw_args else {}
+                                except Exception:
+                                    args = {}
+                            elif isinstance(raw_args, dict):
+                                args = raw_args
+                            else:
+                                args = {}
+
+                            nl_name = tool_name.replace("_", " ").title() or "Tool"
+                            yield f"data: {json.dumps({'type': _AgenticEvent.TOOL_CALL, 'tool': tool_name, 'nl_name': nl_name})}\n\n"
+
+                            t0 = time.monotonic()
+                            if tool_name:
+                                outcome = await _call_mcp_tool(mcp, tool_name, args)
+                            else:
+                                outcome = {"success": False, "data": None, "error": "model returned an empty tool name"}
+                            timing_ms = round((time.monotonic() - t0) * 1000, 1)
+
+                            result_obj = {
+                                "success": outcome["success"],
+                                "tool": tool_name,
+                                "params": args,
+                                "result": json.dumps(outcome["data"]) if outcome["success"] else None,
+                                "error": None if outcome["success"] else (outcome["error"] or "Tool failed"),
+                                "timing_ms": timing_ms,
+                            }
+                            yield f"data: {json.dumps({'type': _AgenticEvent.TOOL_RESULT, 'tool': tool_name, 'result': result_obj})}\n\n"
+
+                            msgs.append(
+                                {
+                                    "role": "tool",
+                                    "tool_name": tool_name,
+                                    "content": json.dumps(
+                                        outcome["data"] if outcome["success"] else {"error": outcome["error"]}
+                                    ),
+                                }
+                            )
+                    else:
+                        yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': '(stopped after several tool calls without a final answer - try rephrasing)'})}\n\n"
 
             yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
 
@@ -1154,51 +1325,8 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 status_code=400,
             )
 
-        try:
-            result = await mcp.call_tool(str(tool_name), params)
-        except Exception as exc:
-            logger.exception("Tool %s failed: %s", tool_name, exc)
-            return JSONResponse(
-                {"success": False, "error": str(exc), "data": None},
-                status_code=500,
-            )
-
-        mcp_result = result.to_mcp_result()
-        is_error = False
-        content_list: list[Any] = []
-        structured_content: Any = None
-        if hasattr(mcp_result, "isError"):
-            # CallToolResult: only path that actually carries an error flag.
-            is_error = bool(mcp_result.isError)
-            content_list = getattr(mcp_result, "content", None) or []
-            structured_content = getattr(mcp_result, "structuredContent", None)
-        elif isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
-            # (content, structured_content) - never an error path, per FastMCP's
-            # ToolResult.to_mcp_result(). structured_content is a dict, not a bool -
-            # do not use it as an is_error flag (a truthy dict would always read as an error).
-            content_list, structured_content = mcp_result[0], mcp_result[1]
-        else:
-            content_list = mcp_result if isinstance(mcp_result, list) else getattr(result, "content", [])
-
-        data: Any = structured_content
-        error_text: str | None = None
-        if content_list:
-            text = getattr(content_list[0], "text", str(content_list[0]))
-            if data is None:
-                try:
-                    data = json.loads(text)
-                except Exception:
-                    data = {"output": text}
-            if is_error:
-                error_text = text
-
-        return JSONResponse(
-            {
-                "success": not is_error and data is not None,
-                "data": data,
-                "error": None if not is_error else (error_text or "Tool returned error"),
-            }
-        )
+        outcome = await _call_mcp_tool(mcp, str(tool_name), params)
+        return JSONResponse(outcome)
 
     # ── /api/skills ──────────────────────────────────────────────────────────
     @app.get("/api/skills")
