@@ -2,12 +2,15 @@
 Unit tests for Inkscape MCP configuration module.
 """
 
-import os
 import tempfile
-from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+import yaml
+from pydantic import ValidationError
+
 from inkscape_mcp.config import InkscapeConfig
+from inkscape_mcp.config import create_default_config_file
 from inkscape_mcp.config import load_config
 
 
@@ -18,193 +21,222 @@ class TestInkscapeConfig:
         """Test config initializes with sensible defaults."""
         config = InkscapeConfig()
 
-        assert config.inkscape_executable == ""
-        assert config.max_concurrent_processes == 4
-        assert config.process_timeout == 30.0
-        assert config.enable_gpu_acceleration is False
-        assert config.temp_directory == ""
+        assert config.inkscape_executable is None
+        assert config.max_concurrent_processes == 3
+        assert config.process_timeout == 30
+        assert config.temp_directory == tempfile.gettempdir()
+        assert config.max_file_size_mb == 100
+        assert config.default_quality == 95
+        assert config.default_interpolation == "lanczos"
+        assert config.log_level == "INFO"
+        assert "svg" in config.supported_formats
 
     def test_custom_initialization(self):
-        """Test config with custom values."""
-        config = InkscapeConfig()
-        config.inkscape_executable = "/usr/bin/inkscape"
-        config.max_concurrent_processes = 2
-        config.process_timeout = 60.0
+        """Test config with custom values passed to the constructor."""
+        config = InkscapeConfig(
+            inkscape_executable="/usr/bin/inkscape",
+            max_concurrent_processes=2,
+            process_timeout=60,
+        )
 
         assert config.inkscape_executable == "/usr/bin/inkscape"
         assert config.max_concurrent_processes == 2
-        assert config.process_timeout == 60.0
+        assert config.process_timeout == 60
 
-    @patch.dict(os.environ, {"INKSCAPE_EXECUTABLE": "/custom/path/inkscape"})
-    def test_load_from_environment(self):
-        """Test loading config from environment variables."""
-        config = InkscapeConfig()
-        config.load_from_environment()
+    def test_max_concurrent_processes_out_of_range_rejected(self):
+        """Test that out-of-range values are rejected by field validation."""
+        with pytest.raises(ValidationError):
+            InkscapeConfig(max_concurrent_processes=0)
 
-        assert config.inkscape_executable == "/custom/path/inkscape"
+        with pytest.raises(ValidationError):
+            InkscapeConfig(max_concurrent_processes=11)
 
-    @patch.dict(
-        os.environ,
-        {"INKSCAPE_MAX_CONCURRENT": "8", "INKSCAPE_TIMEOUT": "120", "INKSCAPE_GPU": "true"},
-    )
-    def test_load_all_env_vars(self):
-        """Test loading all environment variables."""
-        config = InkscapeConfig()
-        config.load_from_environment()
+    def test_process_timeout_out_of_range_rejected(self):
+        """Test that an out-of-range process_timeout is rejected."""
+        with pytest.raises(ValidationError):
+            InkscapeConfig(process_timeout=0)
 
-        assert config.max_concurrent_processes == 8
-        assert config.process_timeout == 120.0
-        assert config.enable_gpu_acceleration is True
+    def test_invalid_interpolation_rejected(self):
+        """Test that an unsupported interpolation method is rejected."""
+        with pytest.raises(ValidationError):
+            InkscapeConfig(default_interpolation="bogus")
 
-    def test_invalid_env_values(self):
-        """Test handling of invalid environment variable values."""
-        with patch.dict(
-            os.environ, {"INKSCAPE_MAX_CONCURRENT": "invalid", "INKSCAPE_TIMEOUT": "not_a_number"}
-        ):
-            config = InkscapeConfig()
-            config.load_from_environment()
+    def test_interpolation_normalized_to_lowercase(self):
+        """Test that a valid interpolation method is normalized to lowercase."""
+        config = InkscapeConfig(default_interpolation="LANCZOS")
+        assert config.default_interpolation == "lanczos"
 
-            # Should keep defaults on invalid values
-            assert config.max_concurrent_processes == 4
-            assert config.process_timeout == 30.0
+    def test_invalid_log_level_rejected(self):
+        """Test that an unsupported log level is rejected."""
+        with pytest.raises(ValidationError):
+            InkscapeConfig(log_level="TRACE")
 
-    def test_save_and_load_config_file(self):
-        """Test saving and loading config from file."""
-        config = InkscapeConfig()
-        config.inkscape_executable = "/test/path/inkscape"
-        config.max_concurrent_processes = 6
+    def test_log_level_normalized_to_uppercase(self):
+        """Test that a valid log level is normalized to uppercase."""
+        config = InkscapeConfig(log_level="debug")
+        assert config.log_level == "DEBUG"
 
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-            temp_path = Path(f.name)
+    def test_temp_directory_created(self, tmp_path):
+        """Test that a nonexistent temp_directory is created on validation."""
+        target = tmp_path / "does" / "not" / "exist" / "yet"
+        config = InkscapeConfig(temp_directory=str(target))
 
-        try:
-            # Save config
-            config.save_to_file(str(temp_path))
+        assert target.exists()
+        assert config.temp_directory == str(target)
 
-            # Load config
-            new_config = InkscapeConfig()
-            new_config.load_from_file(str(temp_path))
+    def test_save_and_load_config_file(self, tmp_path):
+        """Test saving and loading config from a YAML file."""
+        config = InkscapeConfig(
+            inkscape_executable="/test/path/inkscape",
+            max_concurrent_processes=6,
+        )
 
-            assert new_config.inkscape_executable == "/test/path/inkscape"
-            assert new_config.max_concurrent_processes == 6
+        config_path = tmp_path / "config.yaml"
+        config.save_to_file(config_path)
 
-        finally:
-            temp_path.unlink(missing_ok=True)
+        loaded = InkscapeConfig.load_from_file(config_path)
+
+        assert loaded.inkscape_executable == "/test/path/inkscape"
+        assert loaded.max_concurrent_processes == 6
 
     def test_load_from_nonexistent_file(self):
-        """Test loading from nonexistent file returns defaults."""
+        """Test loading from a nonexistent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            InkscapeConfig.load_from_file("/nonexistent/config.yaml")
+
+    def test_invalid_yaml_file(self, tmp_path):
+        """Test loading an invalid YAML file raises ValueError."""
+        config_path = tmp_path / "bad.yaml"
+        config_path.write_text("key: [unclosed", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            InkscapeConfig.load_from_file(config_path)
+
+    def test_load_from_empty_file_uses_defaults(self, tmp_path):
+        """Test that an empty config file loads as all-default config."""
+        config_path = tmp_path / "empty.yaml"
+        config_path.write_text("", encoding="utf-8")
+
+        config = InkscapeConfig.load_from_file(config_path)
+        assert config.inkscape_executable is None
+        assert config.max_concurrent_processes == 3
+
+    def test_is_format_supported(self):
+        """Test format support checking is case-insensitive."""
         config = InkscapeConfig()
-        config.load_from_file("/nonexistent/config.json")
+        assert config.is_format_supported("SVG") is True
+        assert config.is_format_supported("png") is True
+        assert config.is_format_supported("docx") is False
 
-        # Should keep defaults
-        assert config.inkscape_executable == ""
-        assert config.max_concurrent_processes == 4
+    def test_get_temp_file_path(self, tmp_path):
+        """Test unique temp file path generation."""
+        config = InkscapeConfig(temp_directory=str(tmp_path))
+        path = config.get_temp_file_path(suffix=".svg")
 
-    def test_invalid_json_file(self):
-        """Test loading invalid JSON file."""
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-            f.write("invalid json content {")
-            temp_path = Path(f.name)
+        assert path.parent == tmp_path
+        assert path.suffix == ".svg"
+        assert path.name.startswith("inkscape_mcp_")
 
-        try:
-            config = InkscapeConfig()
-            config.load_from_file(str(temp_path))
+    def test_validate_file_size(self, tmp_path):
+        """Test file size validation against configured limits."""
+        config = InkscapeConfig(max_file_size_mb=1)
 
-            # Should keep defaults on invalid JSON
-            assert config.inkscape_executable == ""
+        small_file = tmp_path / "small.svg"
+        small_file.write_bytes(b"x" * 100)
+        assert config.validate_file_size(small_file) is True
 
-        finally:
-            temp_path.unlink(missing_ok=True)
+        assert config.validate_file_size(tmp_path / "missing.svg") is False
 
-    def test_config_validation(self):
-        """Test config value validation."""
-        config = InkscapeConfig()
+    def test_create_temp_subdirectory(self, tmp_path):
+        """Test creating a subdirectory under temp_directory."""
+        config = InkscapeConfig(temp_directory=str(tmp_path))
+        subdir = config.create_temp_subdirectory("batch1")
 
-        # Test negative values are rejected
-        config.max_concurrent_processes = -1
-        assert config.max_concurrent_processes >= 1
-
-        config.process_timeout = 0
-        assert config.process_timeout > 0
-
-    def test_get_config_summary(self):
-        """Test config summary generation."""
-        config = InkscapeConfig()
-        config.inkscape_executable = "/usr/bin/inkscape"
-        config.max_concurrent_processes = 2
-
-        summary = config.get_summary()
-        assert isinstance(summary, dict)
-        assert "inkscape_executable" in summary
-        assert "max_concurrent_processes" in summary
-        assert summary["inkscape_executable"] == "/usr/bin/inkscape"
-        assert summary["max_concurrent_processes"] == 2
+        assert subdir == tmp_path / "batch1"
+        assert subdir.exists()
 
 
 class TestLoadConfig:
     """Test the load_config function."""
 
-    @patch("inkscape_mcp.config.InkscapeConfig.load_from_file")
-    @patch("inkscape_mcp.config.InkscapeConfig.load_from_environment")
-    def test_load_config_success(self, mock_env, mock_file):
-        """Test successful config loading."""
-        config = load_config()
+    def test_load_config_creates_default_when_missing(self, tmp_path):
+        """Test that load_config creates a default config file if it doesn't exist."""
+        config_path = tmp_path / "config.yaml"
+        assert not config_path.exists()
 
-        assert isinstance(config, InkscapeConfig)
-        mock_env.assert_called_once()
-        mock_file.assert_called_once()
-
-    @patch("inkscape_mcp.config.InkscapeConfig.load_from_file")
-    @patch("inkscape_mcp.config.InkscapeConfig.load_from_environment")
-    def test_load_config_with_path(self, mock_env, mock_file):
-        """Test loading config with custom path."""
-        config_path = "/custom/config.json"
         config = load_config(config_path)
 
         assert isinstance(config, InkscapeConfig)
-        mock_file.assert_called_once_with(config_path)
-        mock_env.assert_called_once()
+        assert config_path.exists()
+        assert config.max_concurrent_processes == 3
+
+    def test_load_config_with_existing_file(self, tmp_path):
+        """Test loading config from an already-existing file."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            yaml.dump({"max_concurrent_processes": 7}), encoding="utf-8"
+        )
+
+        config = load_config(config_path)
+
+        assert isinstance(config, InkscapeConfig)
+        assert config.max_concurrent_processes == 7
+
+    def test_load_config_falls_back_to_default_on_invalid_file(self, tmp_path):
+        """Test that an invalid config file falls back to InkscapeConfig.load_default()."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("key: [unclosed", encoding="utf-8")
+
+        with patch(
+            "inkscape_mcp.config.InkscapeConfig.load_default",
+            return_value=InkscapeConfig(),
+        ) as mock_default:
+            config = load_config(config_path)
+
+        mock_default.assert_called_once()
+        assert isinstance(config, InkscapeConfig)
+
+
+class TestCreateDefaultConfigFile:
+    """Test the create_default_config_file function."""
+
+    def test_creates_file_with_expected_defaults(self, tmp_path):
+        """Test that the generated default config file parses into expected defaults."""
+        config_path = tmp_path / "nested" / "config.yaml"
+        create_default_config_file(config_path)
+
+        assert config_path.exists()
+
+        config = InkscapeConfig.load_from_file(config_path)
+        assert config.max_concurrent_processes == 3
+        assert config.process_timeout == 30
+        assert config.log_level == "INFO"
 
 
 class TestConfigIntegration:
     """Integration tests for config functionality."""
 
-    def test_config_file_roundtrip(self):
+    def test_config_file_roundtrip(self, tmp_path):
         """Test that config can be saved and loaded identically."""
-        original = InkscapeConfig()
-        original.inkscape_executable = "/test/inkscape"
-        original.max_concurrent_processes = 3
-        original.process_timeout = 45.0
-        original.enable_gpu_acceleration = True
+        original = InkscapeConfig(
+            inkscape_executable="/test/inkscape",
+            max_concurrent_processes=3,
+            process_timeout=45,
+        )
 
-        with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as f:
-            temp_path = Path(f.name)
+        config_path = tmp_path / "roundtrip.yaml"
+        original.save_to_file(config_path)
+        loaded = InkscapeConfig.load_from_file(config_path)
 
-        try:
-            # Save and reload
-            original.save_to_file(str(temp_path))
-            loaded = InkscapeConfig()
-            loaded.load_from_file(str(temp_path))
+        assert loaded.inkscape_executable == original.inkscape_executable
+        assert loaded.max_concurrent_processes == original.max_concurrent_processes
+        assert loaded.process_timeout == original.process_timeout
 
-            # Verify all values match
-            assert loaded.inkscape_executable == original.inkscape_executable
-            assert loaded.max_concurrent_processes == original.max_concurrent_processes
-            assert loaded.process_timeout == original.process_timeout
-            assert loaded.enable_gpu_acceleration == original.enable_gpu_acceleration
+    def test_detect_inkscape_executable_honors_env_override(self, tmp_path, monkeypatch):
+        """Test that INKSCAPE_PATH env var is honored by auto-detection."""
+        fake_exe = tmp_path / "inkscape.exe"
+        fake_exe.write_text("")
+        monkeypatch.setenv("INKSCAPE_PATH", str(fake_exe))
 
-        finally:
-            temp_path.unlink(missing_ok=True)
-
-    @patch.dict(
-        os.environ, {"INKSCAPE_EXECUTABLE": "/env/inkscape", "INKSCAPE_MAX_CONCURRENT": "5"}
-    )
-    def test_env_overrides_defaults(self):
-        """Test that environment variables override defaults."""
-        config = InkscapeConfig()
-        config.load_from_environment()
-
-        assert config.inkscape_executable == "/env/inkscape"
-        assert config.max_concurrent_processes == 5
-        # Other values should remain defaults
-        assert config.process_timeout == 30.0
-        assert config.enable_gpu_acceleration is False
+        detected = InkscapeConfig._detect_inkscape_executable()
+        assert detected == str(fake_exe)
