@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { apiDelete } from "@/api/client";
+import { cn } from "@/common/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -10,7 +11,6 @@ import {
   saveLlmSettings,
   startInstall,
 } from "@/lib/llm";
-import { cn } from "@/common/utils";
 
 type Props = {
   providers: ProviderInfo[];
@@ -42,7 +42,9 @@ export function LlmProviderCards({
   function statusDot(p: ProviderInfo) {
     if (p.kind === "local") {
       if (probing)
-        return <span className="h-2 w-2 rounded-full bg-slate-500 animate-pulse" />;
+        return (
+          <span className="h-2 w-2 rounded-full bg-slate-500 animate-pulse" />
+        );
       return p.detected ? (
         <span className="h-2 w-2 rounded-full bg-green-500" />
       ) : (
@@ -173,7 +175,9 @@ export function LlmProviderCards({
             >
               <div className="flex items-center gap-2">
                 {statusDot(p)}
-                <span className="text-sm font-semibold text-slate-200">{p.label}</span>
+                <span className="text-sm font-semibold text-slate-200">
+                  {p.label}
+                </span>
                 <span className="text-[10px] rounded bg-slate-800 px-1.5 py-0.5 text-slate-400">
                   local · free
                 </span>
@@ -188,7 +192,8 @@ export function LlmProviderCards({
                     <code className="font-mono">
                       winget install -e --id Ollama.Ollama
                     </code>{" "}
-                    then <code className="font-mono">ollama pull qwen3:32b</code> —
+                    then{" "}
+                    <code className="font-mono">ollama pull qwen3:32b</code> —
                     or see the{" "}
                     <Link to="/skills" className="underline">
                       skills page
@@ -242,7 +247,9 @@ export function LlmProviderCards({
             >
               <div className="flex items-center gap-2">
                 {statusDot(p)}
-                <span className="text-sm font-semibold text-slate-200">{p.label}</span>
+                <span className="text-sm font-semibold text-slate-200">
+                  {p.label}
+                </span>
                 <span className="text-[10px] rounded bg-slate-800 px-1.5 py-0.5 text-slate-400">
                   cloud · paid
                 </span>
@@ -284,7 +291,11 @@ export function LlmProviderCards({
                   Save key
                 </Button>
                 {p.configured && (
-                  <Button size="sm" variant="ghost" onClick={() => void clearKey(p.id)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void clearKey(p.id)}
+                  >
                     Clear
                   </Button>
                 )}

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { LlmOnboarding } from "@/components/llm/LlmOnboarding";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import API_BASE from "@/lib/api";
@@ -230,6 +231,8 @@ export function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      <LlmOnboarding mode="banner" />
 
       {err && (
         <div

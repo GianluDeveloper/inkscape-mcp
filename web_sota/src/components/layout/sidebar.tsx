@@ -1,6 +1,7 @@
 import {
   Activity,
   Bot,
+  BrainCircuit,
   ChevronLeft,
   ChevronRight,
   CircleHelp,
@@ -42,6 +43,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     { href: "/apps", label: "Apps", icon: Grid3X3 },
     { href: "/api-docs", label: "API Docs", icon: Code2 },
     { href: "/settings", label: "Settings", icon: Settings },
+    { href: "/ai-settings", label: "AI Settings", icon: BrainCircuit },
   ];
 
   return (

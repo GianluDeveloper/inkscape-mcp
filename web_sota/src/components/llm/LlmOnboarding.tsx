@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "@/api/client";
+import { cn } from "@/common/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -15,7 +16,6 @@ import {
   saveLlmSettings,
   saveSelection,
 } from "@/lib/llm";
-import { cn } from "@/common/utils";
 
 type Props = {
   /** banner: render only when setup is incomplete. full: always render status + setup. */

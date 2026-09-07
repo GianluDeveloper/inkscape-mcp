@@ -13,7 +13,15 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import API_BASE, { getLlmProviders, type LlmProvider } from "@/lib/api";
+import API_BASE from "@/lib/api";
+import {
+  fetchLlmSettings,
+  fetchProviders,
+  loadSelection,
+  type ProviderInfo,
+  saveSelection,
+  subscribeSelection,
+} from "@/lib/llm";
 
 type Role = "user" | "assistant";
 type Personality = { id: string; name: string; prompt: string };
@@ -45,7 +53,16 @@ const PERSONALITIES: Personality[] = [
     id: "expert",
     name: "SVG Expert",
     prompt:
-      "You are a senior Inkscape/SVG engineer. Answer concisely with practical commands, precise SVG attributes, and vector graphics best practices.",
+      "You are a senior Inkscape/SVG engineer embedded in this MCP server. Answer concisely with practical commands, precise SVG attributes, and vector graphics best practices.\n\n" +
+      "This server exposes real tools an agent can call - when a request maps to one, name the specific tool and operation instead of only describing generic GUI steps: " +
+      "inkscape_file (load, save, convert, validate, list_formats), " +
+      "inkscape_vector (60+ operations incl. trace_image, generate_barcode_qr, apply_boolean, path_simplify, path_clean, object_to_path, optimize_svg, scour_svg, render_preview, export_dxf, text_to_path), " +
+      "inkscape_analysis (quality, statistics, dimensions, structure - read-only, call before mutating), " +
+      "inkscape_layers (list, create, rename, hide, show, lock), " +
+      "inkscape_animation (SMIL preset library, 100% client-side, no Inkscape needed), " +
+      "inkscape_render (export_preview, export_multi_dpi, get_document_summary), " +
+      "inkscape_validation (validate_svg, check_viewbox, audit_web_svg), " +
+      "inkscape_system (status, diagnostics, version, config).",
   },
   {
     id: "artist",
@@ -92,19 +109,17 @@ export function Chat() {
   const [personality, setPersonality] = useState(
     () => localStorage.getItem("inkscape-chat-persona") || "expert",
   );
-  const [provider, setProvider] = useState(
-    () => localStorage.getItem("inkscape-chat-provider") || "ollama",
-  );
-  const [model, setModel] = useState(
-    () => localStorage.getItem("inkscape-chat-model") || "qwen2.5-coder:latest",
-  );
+  // Shared selection (SETTINGS_LLM.md): backend-truth file + cross-tab sync,
+  // never a hardcoded default model. AI Settings and Chat read/write the same
+  // state, so switching providers there is reflected here without a reload.
+  const [provider, setProvider] = useState(() => loadSelection().provider);
+  const [model, setModel] = useState(() => loadSelection().model);
   const [endpoint, setEndpoint] = useState(
     () =>
-      localStorage.getItem("inkscape-chat-endpoint") ||
-      "http://127.0.0.1:11434",
+      DEFAULT_ENDPOINTS[loadSelection().provider] ?? DEFAULT_ENDPOINTS.ollama,
   );
   const [showSettings, setShowSettings] = useState(false);
-  const [providers, setProviders] = useState<LlmProvider[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -118,43 +133,13 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!showSettings) return;
-    let cancelled = false;
-    (async () => {
-      setLoadingProviders(true);
-      try {
-        const list = await getLlmProviders(false);
-        if (cancelled) return;
-        setProviders(list);
-        const match = list.find((p) => p.type === provider);
-        if (match) {
-          if (!model || !match.models.includes(model)) {
-            if (match.models[0]) setModel(match.models[0]);
-          }
-          setEndpoint(match.base_url);
-        }
-      } catch {
-        // non-fatal
-      } finally {
-        if (!cancelled) setLoadingProviders(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [showSettings]);
-
   const refreshProviders = useCallback(async () => {
     setLoadingProviders(true);
     try {
-      const list = await getLlmProviders(true);
+      const { providers: list } = await fetchProviders();
       setProviders(list);
-      const match = list.find((p) => p.type === provider);
-      if (match) {
-        setEndpoint(match.base_url);
-        if (match.models[0]) setModel(match.models[0]);
-      }
+      const match = list.find((p) => p.id === provider);
+      if (match) setEndpoint(match.base_url);
     } catch {
       // non-fatal
     } finally {
@@ -162,33 +147,61 @@ export function Chat() {
     }
   }, [provider]);
 
+  // Backend-truth reconciliation on mount (SETTINGS_LLM.md rule 2): the
+  // localStorage mirror used for the initial state above may be stale if AI
+  // Settings changed the selection while this page wasn't open.
+  useEffect(() => {
+    (async () => {
+      try {
+        const s = await fetchLlmSettings();
+        if (s.provider) setProvider(s.provider);
+        if (s.model !== undefined) setModel(s.model ?? "");
+      } catch {
+        // backend truth unavailable: localStorage mirror stands
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!showSettings) return;
+    void refreshProviders();
+  }, [showSettings, refreshProviders]);
+
+  // Live-sync: pick up a selection change made elsewhere (AI Settings, or
+  // this same page in another tab) without a reload.
+  useEffect(
+    () =>
+      subscribeSelection((sel) => {
+        setProvider(sel.provider);
+        setModel(sel.model);
+      }),
+    [],
+  );
+
   const onProviderChange = useCallback(
     (next: string) => {
+      // RULE: never auto-pick. Switching provider clears the model until
+      // the user (or AI Settings) picks one explicitly.
       setProvider(next);
-      localStorage.setItem("inkscape-chat-provider", next);
-      const match = providers.find((p) => p.type === next);
-      if (match) {
-        setEndpoint(match.base_url);
-        localStorage.setItem("inkscape-chat-endpoint", match.base_url);
-        if (match.models[0]) {
-          setModel(match.models[0]);
-          localStorage.setItem("inkscape-chat-model", match.models[0]);
-        }
-      } else {
-        const fallback = DEFAULT_ENDPOINTS[next] ?? DEFAULT_ENDPOINTS.ollama;
-        setEndpoint(fallback);
-        localStorage.setItem("inkscape-chat-endpoint", fallback);
-      }
+      setModel("");
+      saveSelection(next, "");
+      const match = providers.find((p) => p.id === next);
+      setEndpoint(
+        match?.base_url ?? DEFAULT_ENDPOINTS[next] ?? DEFAULT_ENDPOINTS.ollama,
+      );
     },
     [providers],
   );
 
-  const onModelChange = useCallback((next: string) => {
-    setModel(next);
-    localStorage.setItem("inkscape-chat-model", next);
-  }, []);
+  const onModelChange = useCallback(
+    (next: string) => {
+      setModel(next);
+      saveSelection(provider, next);
+    },
+    [provider],
+  );
 
-  const activeProvider = providers.find((p) => p.type === provider);
+  const activeProvider = providers.find((p) => p.id === provider);
   const modelOptions = activeProvider?.models ?? [];
 
   const toggleCard = useCallback((idx: number) => {
@@ -203,6 +216,19 @@ export function Chat() {
   const send = useCallback(async () => {
     const q = input.trim();
     if (!q || streaming) return;
+    // SETTINGS_LLM.md rule 6: send-time guard. No fallback model, ever.
+    if (!model) {
+      setShowSettings(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Pick a model in Settings before chatting.",
+          timestamp: Date.now(),
+        },
+      ]);
+      return;
+    }
     setInput("");
     const userMsg: Message = {
       role: "user",
@@ -435,15 +461,15 @@ export function Chat() {
                   <option value="ollama">Ollama</option>
                 ) : (
                   providers.map((p) => (
-                    <option key={p.type} value={p.type}>
-                      {p.type}
+                    <option key={p.id} value={p.id}>
+                      {p.label}
                     </option>
                   ))
                 )}
               </select>
               {activeProvider && (
                 <span
-                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${activeProvider.reachable ? "bg-green-500" : "bg-red-500"}`}
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 h-2 w-2 rounded-full ${(activeProvider.kind === "local" ? activeProvider.detected : activeProvider.configured) ? "bg-green-500" : "bg-red-500"}`}
                 />
               )}
             </div>

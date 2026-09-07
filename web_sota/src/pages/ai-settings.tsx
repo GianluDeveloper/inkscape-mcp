@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { ActiveLlmCard } from "@/components/llm/ActiveLlmCard";
 import { LlmOnboarding } from "@/components/llm/LlmOnboarding";
 import { LlmProviderCards } from "@/components/llm/LlmProviderCards";
-import { fetchLlmSettings, fetchProviders, loadSelection, type ProviderInfo } from "@/lib/llm";
+import {
+  fetchLlmSettings,
+  fetchProviders,
+  loadSelection,
+  type ProviderInfo,
+} from "@/lib/llm";
 
 export function AiSettings() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
