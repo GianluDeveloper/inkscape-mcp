@@ -2,6 +2,7 @@
 SVG test fixtures and data for testing.
 """
 
+import os
 import tempfile
 from pathlib import Path
 
