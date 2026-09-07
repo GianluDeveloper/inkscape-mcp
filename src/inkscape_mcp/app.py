@@ -98,7 +98,12 @@ def _filter_logs(
         logs = [e for e in logs if e.get("kind") == kind]
     if search:
         needle = search.lower()
-        logs = [e for e in logs if needle in str(e.get("detail", "")).lower()]
+        logs = [
+            e
+            for e in logs
+            if needle in str(e.get("detail", "")).lower()
+            or needle in json.dumps(e.get("meta", {})).lower()
+        ]
     return logs
 
 
@@ -574,9 +579,16 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 writer.writerow(
                     [e.get("id", ""), e.get("timestamp", ""), e.get("level", ""), e.get("kind", ""), e.get("detail", "")]
                 )
-            return Response(content=buf.getvalue(), media_type="text/csv")
+            return Response(
+                content=buf.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": 'attachment; filename="logs.csv"'},
+            )
 
-        return JSONResponse({"logs": logs, "total": len(logs)})
+        return JSONResponse(
+            {"logs": logs, "total": len(logs)},
+            headers={"Content-Disposition": 'attachment; filename="logs.json"'},
+        )
 
     @app.delete("/api/logs")
     async def api_logs_clear() -> dict:
