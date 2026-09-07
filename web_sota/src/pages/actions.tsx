@@ -8,7 +8,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import { mcpClient } from "@/common/mcp-client";
+import { callTool } from "@/api/mcp";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -37,13 +37,16 @@ export function Actions() {
       [id]: { loading: true, result: null, error: null },
     }));
     try {
-      const result = await mcpClient.callTool("inkscape_vector", {
+      const res = await callTool("inkscape_vector", {
         operation,
         ...args,
       });
+      if (!res.success) {
+        throw new Error(res.error || "Action failed");
+      }
       setStatus((prev) => ({
         ...prev,
-        [id]: { loading: false, result, error: null },
+        [id]: { loading: false, result: res.data, error: null },
       }));
     } catch (error: any) {
       setStatus((prev) => ({

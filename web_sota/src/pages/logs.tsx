@@ -53,14 +53,15 @@ export default function Logging() {
       try {
         const r = await fetch(`${API_BASE}/api/logs?${params}`);
         const d = await r.json();
+        const logs = d.logs ?? [];
         if (opts.tail && opts.after_id) {
-          setEntries((prev) => [...prev, ...d.entries].slice(-200));
+          setEntries((prev) => [...prev, ...logs].slice(-200));
         } else {
-          setEntries(d.entries);
+          setEntries(logs);
         }
         setTotal(d.total);
-        if (d.entries.length > 0) {
-          afterIdRef.current = d.entries[d.entries.length - 1].id;
+        if (logs.length > 0) {
+          afterIdRef.current = logs[logs.length - 1].id;
         }
       } catch (e) {
         console.error("Log fetch failed", e);

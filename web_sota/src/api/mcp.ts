@@ -1,6 +1,6 @@
 /**
  * MCP API client for Inkscape MCP webapp Agent Lab.
- * Backend: POST /api/v1/tool on port 10900 (proxied via Vite /api).
+ * Backend: POST /v1/tool (no /api prefix, mounted at server root) on port 11028.
  */
 
 const API_BASE = "/api";
@@ -33,7 +33,7 @@ export async function callTool<T>(
   params: Record<string, unknown> = {},
 ): Promise<MCPResponse<T>> {
   try {
-    const response = await fetch(`${API_BASE}/v1/tool`, {
+    const response = await fetch("/v1/tool", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tool, params }),

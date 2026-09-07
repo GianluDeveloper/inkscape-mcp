@@ -20,13 +20,15 @@ interface Layer {
 }
 
 async function callTool(tool: string, params: Record<string, any>) {
-  const r = await fetch(`${API_BASE}/api/v1/tool`, {
+  const r = await fetch(`${API_BASE}/v1/tool`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, params }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  const body = await r.json();
+  if (body.success === false) throw new Error(body.error || "Tool call failed");
+  return body;
 }
 
 export function LayerManager() {
@@ -45,7 +47,7 @@ export function LayerManager() {
         operation: "list",
         input_path: inputPath,
       });
-      setLayers(r?.result?.data?.layers || []);
+      setLayers(r?.data?.layers || []);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -63,8 +65,8 @@ export function LayerManager() {
           input_path: inputPath,
           ...extra,
         });
-        if (r?.result?.data?.layers) {
-          setLayers(r.result.data.layers);
+        if (r?.data?.layers) {
+          setLayers(r.data.layers);
         } else {
           await load();
         }
