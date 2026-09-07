@@ -3,11 +3,17 @@
   "install_dir": "%LOCALAPPDATA%\\Inkscape MCP",
   "operator_exe": "inkscape-mcp-native.exe",
   "backend_process_names": ["inkscape-mcp-native", "inkscape-mcp-backend"],
-  "backend_port": 11027,
+  "backend_port": 11028,
   "health_path": "/api/health",
   "diagnostics_path": "/api/v1/diagnostics",
   "feature_smoke_path": "/api/v1/system/info",
   "window_title_re": "Inkscape MCP",
+  "nav_routes": [
+    ["Overview", "Inkscape MCP"],
+    ["Logs", "Logs"],
+    ["Settings", "Settings"],
+    ["Help", "Help"]
+  ],
   "nsis_glob": "native/target/release/bundle/nsis/Inkscape MCP_*_x64-setup.exe",
   "bridge_ok_text": "REST bridge reachable",
   "uninstall_registry_filter": "*Inkscape MCP*"

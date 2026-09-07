@@ -44,6 +44,12 @@ export function Actions() {
       if (!res.success) {
         throw new Error(res.error || "Action failed");
       }
+      const toolData = res.data as
+        | { success?: boolean; message?: string; error?: string }
+        | undefined;
+      if (toolData && toolData.success === false) {
+        throw new Error(toolData.error || toolData.message || "Action failed");
+      }
       setStatus((prev) => ({
         ...prev,
         [id]: { loading: false, result: res.data, error: null },

@@ -17,6 +17,8 @@ Environment (via .env or system):
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
@@ -36,6 +38,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.responses import PlainTextResponse
+    from starlette.responses import Response
     from starlette.responses import StreamingResponse
     from starlette.routing import Mount
 
@@ -47,26 +50,56 @@ logger = logging.getLogger(__name__)
 
 # ── In-memory log ring (HTTP dashboard GET /api/logs) ─────────────────────────
 MAX_MEMORY_LOGS = 1000
-_memory_logs: list[dict[str, str]] = []
+_memory_logs: list[dict[str, Any]] = []
 _memory_lock = threading.Lock()
 _memory_handler: logging.Handler | None = None
+_log_id_counter = 0
 
 
 class _MemoryLogHandler(logging.Handler):
     """Capture log records for the web UI (no persistence)."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        global _log_id_counter
         try:
             msg = self.format(record)
             ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            entry = {"timestamp": ts, "level": record.levelname, "message": msg}
+            name_lower = record.name.lower()
+            if "tool" in name_lower:
+                kind = "tool_call"
+            elif "export" in name_lower:
+                kind = "export"
+            else:
+                kind = "server"
             with _memory_lock:
+                _log_id_counter += 1
+                entry = {
+                    "id": str(_log_id_counter),
+                    "timestamp": ts,
+                    "level": record.levelname,
+                    "kind": kind,
+                    "detail": msg,
+                    "meta": {"logger": record.name},
+                }
                 _memory_logs.append(entry)
                 overflow = len(_memory_logs) - MAX_MEMORY_LOGS
                 if overflow > 0:
                     del _memory_logs[0:overflow]
         except Exception:
             self.handleError(record)
+
+
+def _filter_logs(
+    logs: list[dict[str, Any]], *, level: str = "", kind: str = "", search: str = ""
+) -> list[dict[str, Any]]:
+    if level:
+        logs = [e for e in logs if e.get("level") == level]
+    if kind:
+        logs = [e for e in logs if e.get("kind") == kind]
+    if search:
+        needle = search.lower()
+        logs = [e for e in logs if needle in str(e.get("detail", "")).lower()]
+    return logs
 
 
 def _attach_memory_logging() -> None:
@@ -77,6 +110,14 @@ def _attach_memory_logging() -> None:
     _memory_handler.setLevel(logging.INFO)
     _memory_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()
+    # When this app is imported directly as an ASGI target (e.g. `uvicorn
+    # inkscape_mcp.server:app`, as the fleet launcher does), main.py's CLI-only
+    # logging.basicConfig() never runs, so the root logger stays at its default
+    # WARNING level and every INFO record - including this buffer's own entries -
+    # is dropped before it reaches any handler. Raise it, but never lower a level
+    # someone already configured more verbosely.
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
     root.addHandler(_memory_handler)
     logger.info("REST: memory log buffer enabled (GET/DELETE /api/logs)")
 
@@ -490,11 +531,52 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     _attach_memory_logging()
 
     @app.get("/api/logs")
-    async def api_logs(limit: int = 400) -> dict:
+    async def api_logs(
+        limit: int = 400,
+        offset: int = 0,
+        level: str = "",
+        kind: str = "",
+        search: str = "",
+        sort: str = "desc",
+        after_id: str = "",
+    ) -> dict:
         limit = max(1, min(limit, MAX_MEMORY_LOGS))
         with _memory_lock:
-            tail = _memory_logs[-limit:]
-        return {"logs": tail, "returned": len(tail), "total": len(_memory_logs)}
+            logs = list(_memory_logs)
+        logs = _filter_logs(logs, level=level, kind=kind, search=search)
+
+        if after_id:
+            idx = next((i for i, e in enumerate(logs) if e.get("id") == after_id), None)
+            tail = logs[idx + 1 :] if idx is not None else []
+            return {"logs": tail, "returned": len(tail), "total": len(logs)}
+
+        total = len(logs)
+        ordered = list(reversed(logs)) if sort != "asc" else logs
+        page = ordered[offset : offset + limit]
+        return {"logs": page, "returned": len(page), "total": total}
+
+    @app.get("/api/logs/export")
+    async def api_logs_export(
+        format: str = "json",
+        level: str = "",
+        kind: str = "",
+        search: str = "",
+    ) -> Response:
+        with _memory_lock:
+            logs = list(_memory_logs)
+        logs = _filter_logs(logs, level=level, kind=kind, search=search)
+
+        if format == "csv":
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["id", "timestamp", "level", "kind", "detail"])
+            for e in logs:
+                writer.writerow(
+                    [e.get("id", ""), e.get("timestamp", ""), e.get("level", ""), e.get("kind", ""), e.get("detail", "")]
+                )
+            return Response(content=buf.getvalue(), media_type="text/csv")
+
+        return JSONResponse({"logs": logs, "total": len(logs)})
 
     @app.delete("/api/logs")
     async def api_logs_clear() -> dict:
@@ -837,25 +919,37 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         mcp_result = result.to_mcp_result()
         is_error = False
         content_list: list[Any] = []
-        if isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
-            content_list = mcp_result[0]
-            is_error = mcp_result[1]
+        structured_content: Any = None
+        if hasattr(mcp_result, "isError"):
+            # CallToolResult: only path that actually carries an error flag.
+            is_error = bool(mcp_result.isError)
+            content_list = getattr(mcp_result, "content", None) or []
+            structured_content = getattr(mcp_result, "structuredContent", None)
+        elif isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
+            # (content, structured_content) - never an error path, per FastMCP's
+            # ToolResult.to_mcp_result(). structured_content is a dict, not a bool -
+            # do not use it as an is_error flag (a truthy dict would always read as an error).
+            content_list, structured_content = mcp_result[0], mcp_result[1]
         else:
-            content_list = getattr(result, "content", [])
+            content_list = mcp_result if isinstance(mcp_result, list) else getattr(result, "content", [])
 
-        data: Any = None
+        data: Any = structured_content
+        error_text: str | None = None
         if content_list:
             text = getattr(content_list[0], "text", str(content_list[0]))
-            try:
-                data = json.loads(text)
-            except Exception:
-                data = {"output": text}
+            if data is None:
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    data = {"output": text}
+            if is_error:
+                error_text = text
 
         return JSONResponse(
             {
                 "success": not is_error and data is not None,
                 "data": data,
-                "error": None if not is_error else "Tool returned error",
+                "error": None if not is_error else (error_text or "Tool returned error"),
             }
         )
 
