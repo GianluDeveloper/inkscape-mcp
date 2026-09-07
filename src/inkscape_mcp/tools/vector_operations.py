@@ -564,7 +564,7 @@ async def inkscape_vector(
             )
 
         elif operation == "layers_to_files":
-            return await _layers_to_files(input_path, output_path, output_dir, cli_wrapper, config)
+            return await _layers_to_files(input_path, output_dir, cli_wrapper, config)
 
         else:
             return VectorOperationResult(
