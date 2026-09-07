@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -41,6 +42,7 @@ from .tools import inkscape_system as inkscape_system_tool
 from .tools import inkscape_validation as inkscape_validation_tool
 from .tools import inkscape_vector as inkscape_vector_tool
 from .tools import list_local_models as list_local_models_tool
+from .tools import llm_ops as llm_ops_tool
 from .tools.heraldry import register_heraldry_tools
 from .transport import run_server_async
 
@@ -602,6 +604,41 @@ class InkscapeMCPServer:
             """
             return await list_local_models_tool()
 
+        @self.mcp.tool(
+            annotations=ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
+        )
+        async def llm_ops(
+            operation: Literal["list_models", "loaded", "switch_model", "unload_all", "vram"],
+            provider: str = "ollama",
+            model: str = "",
+            endpoint: str = "",
+        ) -> dict[str, Any]:
+            """LLM_OPS - Manage the local LLM engine from an agent (same engine
+            path the webapp AI Settings page uses - UI and MCP clients cannot drift).
+
+            Ops: list_models (Ollama + LM Studio model IDs) | loaded (Ollama
+            residents + VRAM) | switch_model (make `model` the only resident:
+            evict rest, warm it) | unload_all (evict everything) | vram
+            (per-GPU telemetry). Only Ollama supports loaded/switch/unload -
+            it is the only engine with a load/unload API.
+
+            Returns:
+                Dict with success, operation, provider, plus op-specific fields
+                (evicted/warmed/engine for switch_model/unload_all, models for
+                loaded/list_models, gpus for vram).
+
+            Errors:
+                switch_model with an empty model - use list_models first, then
+                pass a name from that list. Non-ollama + loaded/switch/unload -
+                returns success=False with recovery_options instead of pretending.
+            """
+            return await llm_ops_tool(operation, provider=provider, model=model, endpoint=endpoint)
+
         self.tools = {
             "inkscape_file": inkscape_file,
             "inkscape_vector": inkscape_vector,
@@ -613,6 +650,7 @@ class InkscapeMCPServer:
             "inkscape_sim_art": inkscape_sim_art,
             "inkscape_system": inkscape_system,
             "list_local_models": list_local_models,
+            "llm_ops": llm_ops,
         }
 
 

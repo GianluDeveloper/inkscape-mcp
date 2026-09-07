@@ -23,6 +23,7 @@ from .fleet_tools import inkscape_fleet
 from .heraldry import register_heraldry_tools
 from .layer_operations import inkscape_layers
 from .llm_discovery import list_local_models
+from .llm_discovery import llm_ops
 from .render_tools import inkscape_render
 from .sim_art_tools import inkscape_sim_art
 from .system import inkscape_system
@@ -43,6 +44,7 @@ __all__ = [
     "inkscape_layers",
     "register_heraldry_tools",
     "list_local_models",
+    "llm_ops",
 ]
 
 logger = logging.getLogger("inkscape-mcp.tools")
@@ -216,3 +218,4 @@ def register_all_tools(mcp: Any, cli_wrapper: Any, config: Any) -> None:
 
     # Register individual utility tools
     mcp.tool()(list_local_models)
+    mcp.tool()(llm_ops)

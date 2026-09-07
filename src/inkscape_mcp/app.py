@@ -31,6 +31,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .services import llm_engine
+from .services import llm_settings_store
+
 try:
     import httpx
     from fastapi import APIRouter
@@ -331,6 +334,57 @@ async def _call_anthropic(prompt: str, system: str) -> str:
         )
         r.raise_for_status()
     return r.json()["content"][0]["text"]
+
+
+async def _call_gemini_chat(messages: list[dict], model: str, api_key: str) -> str:
+    """Multi-turn Gemini call for /api/chat (separate from the single-shot
+    _call_gemini used by /api/generate-svg's cloud fallback - different
+    request shapes, don't conflate the two callers)."""
+    system = "\n".join(m["content"] for m in messages if m.get("role") == "system")
+    contents = [
+        {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+        for m in messages
+        if m.get("role") in ("user", "assistant")
+    ]
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model or 'gemini-2.0-flash'}:generateContent?key={api_key}"
+    )
+    payload: dict[str, Any] = {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": 8192}}
+    if system:
+        payload["system_instruction"] = {"parts": [{"text": system}]}
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+    candidates = r.json().get("candidates", [])
+    if not candidates:
+        return ""
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts)
+
+
+async def _call_anthropic_chat(messages: list[dict], model: str, api_key: str) -> str:
+    """Multi-turn Anthropic call for /api/chat (see _call_gemini_chat note)."""
+    system = "\n".join(m["content"] for m in messages if m.get("role") == "system")
+    turns = [{"role": m["role"], "content": m["content"]} for m in messages if m.get("role") in ("user", "assistant")]
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": model or "claude-haiku-4-5",
+                "max_tokens": 8192,
+                "system": system,
+                "messages": turns or [{"role": "user", "content": ""}],
+            },
+        )
+        r.raise_for_status()
+    content = r.json().get("content", [])
+    return "".join(c.get("text", "") for c in content if c.get("type") == "text")
 
 
 # ── Primary generation pipeline ───────────────────────────────────────────────
@@ -634,7 +688,7 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             payload = {}
         query = str(payload.get("query") or payload.get("message", ""))
         provider = str(payload.get("provider") or "ollama")
-        model = str(payload.get("model") or "qwen2.5-coder:latest")
+        model = str(payload.get("model") or "")
         endpoint = str(payload.get("endpoint") or _ollama_base()).rstrip("/")
         system_prompt = str(payload.get("system_prompt", ""))
         stream = bool(payload.get("stream", False))
@@ -654,6 +708,11 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         if not query:
             return {"reply": "", "status": "error"}
 
+        # SETTINGS_LLM.md rule 6: send-time guard. No fallback model, ever -
+        # an empty selection means the user hasn't picked one in Settings yet.
+        if not model:
+            return {"reply": "Pick a model in Settings before chatting.", "status": "error"}
+
         if not stream:
             return {"reply": "Streaming is required for chat. Set stream=true.", "status": "error"}
 
@@ -665,14 +724,27 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 msgs.append({"role": h.get("role", "user"), "content": h.get("content", "")})
             msgs.append({"role": "user", "content": query})
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                if provider == "lmstudio":
-                    generator = _stream_lmstudio_raw(client, endpoint, model, msgs)
-                else:
-                    generator = _stream_ollama_raw(client, endpoint, model, msgs)
+            if provider in ("gemini", "anthropic"):
+                api_key = llm_settings_store.get_key(provider)
+                if not api_key:
+                    yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': f'No API key configured for {provider}. Add one in AI Settings.'})}\n\n"
+                    yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
+                    return
+                try:
+                    caller = _call_gemini_chat if provider == "gemini" else _call_anthropic_chat
+                    text = await caller(msgs, model, api_key)
+                except Exception as exc:
+                    text = f"{provider} request failed: {exc}"
+                yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': text})}\n\n"
+            else:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    if provider == "lmstudio":
+                        generator = _stream_lmstudio_raw(client, endpoint, model, msgs)
+                    else:
+                        generator = _stream_ollama_raw(client, endpoint, model, msgs)
 
-                async for chunk in generator:
-                    yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': chunk})}\n\n"
+                    async for chunk in generator:
+                        yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
 
@@ -686,47 +758,203 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             },
         )
 
-    # ── /api/llm/providers (auto-discovery for webapp chat settings) ─────────
-    @app.get("/api/llm/providers")
-    async def llm_providers() -> dict:
-        providers: list[dict] = []
-        # Ollama
-        ollama_ok = False
-        ollama_models: list[str] = []
+    # ── /api/llm/* (SETTINGS_LLM.md contract: local + cloud, no-auto-pick) ────
+    _cloud_providers = {
+        "gemini": {"label": "Gemini", "base_url": "https://generativelanguage.googleapis.com"},
+        "anthropic": {"label": "Anthropic", "base_url": "https://api.anthropic.com"},
+    }
+    # Curated fallback lists - these two providers have no cheap "list models"
+    # endpoint worth calling on every provider probe, unlike Ollama/LM Studio.
+    _cloud_curated_models = {
+        "gemini": ["gemini-2.0-flash", "gemini-2.5-pro"],
+        "anthropic": ["claude-haiku-4-5", "claude-sonnet-4-5"],
+    }
+
+    async def _probe_ollama() -> tuple[bool, list[str]]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get(f"{_ollama_base()}/api/tags")
                 if r.status_code == 200:
-                    ollama_models = [m["name"] for m in r.json().get("models", [])]
-                    ollama_ok = True
+                    return True, [m["name"] for m in r.json().get("models", [])]
         except Exception:
             pass
-        providers.append(
-            {
-                "type": "ollama",
-                "base_url": _ollama_base(),
-                "models": ollama_models,
-                "reachable": ollama_ok,
-            }
-        )
-        # LM Studio
-        lm_ok = False
+        return False, []
+
+    async def _probe_lmstudio() -> tuple[bool, list[str]]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get("http://127.0.0.1:1234/v1/models")
                 if r.status_code == 200:
-                    lm_ok = True
+                    return True, [m["id"] for m in r.json().get("data", [])]
         except Exception:
             pass
-        providers.append(
+        return False, []
+
+    @app.get("/api/llm/providers")
+    async def llm_providers() -> dict:
+        ollama_ok, ollama_models = await _probe_ollama()
+        lm_ok, lm_models = await _probe_lmstudio()
+        providers: list[dict] = [
             {
-                "type": "lmstudio",
+                "id": "ollama",
+                "label": "Ollama",
+                "kind": "local",
+                "base_url": _ollama_base(),
+                "needs_key": False,
+                "key_env": None,
+                "configured": True,
+                "detected": ollama_ok,
+                "models": ollama_models,
+            },
+            {
+                "id": "lmstudio",
+                "label": "LM Studio",
+                "kind": "local",
                 "base_url": "http://127.0.0.1:1234",
-                "models": [],
-                "reachable": lm_ok,
-            }
-        )
+                "needs_key": False,
+                "key_env": None,
+                "configured": True,
+                "detected": lm_ok,
+                "models": lm_models,
+            },
+        ]
+        for pid, info in _cloud_providers.items():
+            providers.append(
+                {
+                    "id": pid,
+                    "label": info["label"],
+                    "kind": "cloud",
+                    "base_url": info["base_url"],
+                    "needs_key": True,
+                    "key_env": llm_settings_store.KEY_ENV.get(pid),
+                    "configured": llm_settings_store.has_key(pid),
+                    "models": _cloud_curated_models.get(pid, []),
+                }
+            )
         return {"providers": providers}
+
+    @app.get("/api/llm/models")
+    async def llm_models(provider: str = "ollama") -> dict:
+        if provider == "ollama":
+            _, models = await _probe_ollama()
+            return {"provider": provider, "models": models, "source": "live" if models else "none"}
+        if provider == "lmstudio":
+            _, models = await _probe_lmstudio()
+            return {"provider": provider, "models": models, "source": "live" if models else "none"}
+        curated = _cloud_curated_models.get(provider, [])
+        return {"provider": provider, "models": curated, "source": "curated" if curated else "none"}
+
+    @app.get("/api/llm/gpus")
+    async def llm_gpus() -> dict:
+        return {"gpus": llm_engine.gpu_vram()}
+
+    @app.get("/api/llm/loaded")
+    async def llm_loaded(provider: str = "ollama", endpoint: str = "") -> dict:
+        if provider != "ollama":
+            return {"success": True, "engine": False, "models": []}
+        data = await llm_engine.ollama_loaded(endpoint or _ollama_base())
+        return {"success": True, **data}
+
+    @app.post("/api/llm/unload")
+    async def llm_unload(request: Request) -> dict:
+        payload = await request.json()
+        provider = str(payload.get("provider") or "ollama")
+        endpoint = str(payload.get("endpoint") or "") or _ollama_base()
+        if provider != "ollama":
+            return {"success": False, "evicted": []}
+        result = await llm_engine.switch_ollama_model("", endpoint)
+        return {"success": True, "evicted": result["evicted"]}
+
+    @app.get("/api/settings/llm")
+    async def get_llm_settings() -> dict:
+        data = llm_settings_store.load_settings()
+        return {
+            "provider": data.get("provider"),
+            "endpoint": data.get("endpoint"),
+            "model": data.get("model"),
+        }
+
+    @app.post("/api/settings/llm")
+    async def save_llm_settings(request: Request) -> dict:
+        payload = await request.json()
+        provider = str(payload.get("provider") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        endpoint = payload.get("endpoint")
+        api_key = payload.get("api_key")
+        if not provider:
+            return JSONResponse({"success": False, "error": "provider required"}, status_code=400)
+
+        llm_settings_store.save_settings(provider, endpoint, model)
+        key_saved = False
+        if api_key:
+            llm_settings_store.save_key(provider, str(api_key))
+            key_saved = True
+
+        result: dict[str, Any] = {"success": True}
+        if key_saved:
+            result["key_saved"] = True
+        # Save switches VRAM, not just config (SETTINGS_LLM.md rule 4) - only
+        # meaningful for the local Ollama engine.
+        if provider == "ollama":
+            switch = await llm_engine.switch_ollama_model(model, endpoint or _ollama_base())
+            result["switch"] = switch
+        return result
+
+    @app.delete("/api/settings/llm/key")
+    async def delete_llm_key(provider: str) -> dict:
+        llm_settings_store.clear_key(provider)
+        return {"success": True}
+
+    @app.get("/api/llm/onboarding")
+    async def llm_onboarding() -> dict:
+        ollama_ok, ollama_models = await _probe_ollama()
+        lm_ok, _ = await _probe_lmstudio()
+        locals_ = [
+            {"id": "ollama", "label": "Ollama", "port": 11434},
+            {"id": "lmstudio", "label": "LM Studio", "port": 1234},
+        ]
+        clouds_configured = [pid for pid in _cloud_providers if llm_settings_store.has_key(pid)]
+        if ollama_ok:
+            recommendation = {"path": "local:ollama", "reason": f"Ollama detected with {len(ollama_models)} model(s) - free, local, no key needed."}
+        elif lm_ok:
+            recommendation = {"path": "local:lmstudio", "reason": "LM Studio detected - free, local, no key needed."}
+        elif clouds_configured:
+            recommendation = {"path": f"cloud:{clouds_configured[0]}", "reason": "A cloud key is already configured."}
+        else:
+            recommendation = {"path": "cloud:gemini", "reason": "No local engine detected. Gemini has the cheapest instant path if you'd rather not install anything."}
+        return {"locals": locals_, "clouds_configured": clouds_configured, "recommendation": recommendation}
+
+    _install_state: dict[str, dict[str, Any]] = {}
+
+    @app.post("/api/llm/install")
+    async def llm_install(request: Request) -> dict:
+        payload = await request.json()
+        engine = str(payload.get("engine") or "")
+        if engine != "ollama":
+            return {"engine": engine, "started": False, "reason": "only 'ollama' is installable from here"}
+        _install_state["ollama"] = {"state": "running", "output": ""}
+
+        async def _run() -> None:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "winget", "install", "-e", "--id", "Ollama.Ollama",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                )
+                out, _ = await proc.communicate()
+                _install_state["ollama"] = {
+                    "state": "done" if proc.returncode == 0 else "error",
+                    "output": (out or b"").decode(errors="replace")[-2000:],
+                }
+            except Exception as exc:
+                _install_state["ollama"] = {"state": "error", "output": str(exc)}
+
+        asyncio.create_task(_run())
+        return {"engine": engine, "started": True}
+
+    @app.get("/api/llm/install/status")
+    async def llm_install_status(engine: str = "ollama") -> dict:
+        st = _install_state.get(engine, {"state": "idle", "output": ""})
+        return {"engine": engine, **st}
 
     # ── /api/health ──────────────────────────────────────────────────────────
     @app.get("/api/health")
