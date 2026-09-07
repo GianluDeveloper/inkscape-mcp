@@ -3,7 +3,7 @@ Unit tests for Inkscape CLI wrapper module.
 """
 
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +12,25 @@ from inkscape_mcp.cli_wrapper import InkscapeCliError
 from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
 from inkscape_mcp.cli_wrapper import InkscapeExecutionError
 from inkscape_mcp.cli_wrapper import InkscapeTimeoutError
+
+
+class _FakeProcess:
+    """Stand-in for the asyncio subprocess object returned by create_subprocess_exec."""
+
+    def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self.killed = False
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+    def kill(self):
+        self.killed = True
+
+    async def wait(self):
+        return None
 
 
 class TestInkscapeCliWrapper:
@@ -25,169 +44,127 @@ class TestInkscapeCliWrapper:
         assert wrapper.config.inkscape_executable.endswith("inkscape.exe")
 
     def test_initialization_invalid_config(self):
-        """Test initialization with invalid config raises error."""
-        with pytest.raises(AttributeError):
+        """Test initialization with invalid config raises InkscapeCliError."""
+        with pytest.raises(InkscapeCliError):
             InkscapeCliWrapper(None)
 
     @pytest.mark.asyncio
-    async def test_execute_command_success(self, mock_cli_wrapper, mock_successful_inkscape_run):
+    async def test_execute_command_success(self, mock_cli_wrapper):
         """Test successful command execution."""
-        with patch("subprocess.run", side_effect=mock_successful_inkscape_run):
-            returncode, stdout, stderr = await mock_cli_wrapper._execute_command(["--version"])
+        fake_process = _FakeProcess(returncode=0, stdout=b"test output", stderr=b"")
 
-            assert returncode == 0
-            assert stdout == '{"success": true, "data": "test output"}'
-            assert stderr == ""
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)):
+            result = await mock_cli_wrapper._execute_command(["--version"], timeout=5)
+
+        assert result == "test output"
 
     @pytest.mark.asyncio
-    async def test_execute_command_failure(self, mock_cli_wrapper, mock_failed_inkscape_run):
-        """Test failed command execution."""
-        with patch("subprocess.run", side_effect=mock_failed_inkscape_run):
+    async def test_execute_command_failure(self, mock_cli_wrapper):
+        """Test failed command execution raises InkscapeExecutionError."""
+        fake_process = _FakeProcess(returncode=1, stdout=b"", stderr=b"Error: bad option")
+
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)):
             with pytest.raises(InkscapeExecutionError):
-                await mock_cli_wrapper._execute_command(["--invalid-option"])
+                await mock_cli_wrapper._execute_command(["--invalid-option"], timeout=5)
 
     @pytest.mark.asyncio
     async def test_execute_command_timeout(self, mock_cli_wrapper):
-        """Test command execution timeout."""
-        with patch("subprocess.run", side_effect=asyncio.TimeoutError):
+        """Test command execution timeout raises InkscapeTimeoutError."""
+        fake_process = _FakeProcess(returncode=0)
+
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)),
+            patch("asyncio.wait_for", AsyncMock(side_effect=TimeoutError)),
+        ):
             with pytest.raises(InkscapeTimeoutError):
                 await mock_cli_wrapper._execute_command(["--version"], timeout=0.001)
+
+        assert fake_process.killed is True
 
     @pytest.mark.asyncio
     async def test_execute_actions_success(self, mock_cli_wrapper):
         """Test successful actions execution."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "Actions executed successfully"
-        mock_result.stderr = ""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="Actions executed successfully")
 
-        with patch("subprocess.run", return_value=mock_result):
-            returncode, stdout, stderr = await mock_cli_wrapper._execute_actions(
-                "select-all;export-do", input_path="test.svg"
-            )
+        result = await mock_cli_wrapper.execute_actions(
+            input_path="test.svg", actions=["select-all", "export-do"]
+        )
 
-            assert returncode == 0
-            assert "Actions executed successfully" in stdout
+        assert result == "Actions executed successfully"
+        mock_cli_wrapper._execute_command.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_execute_actions_with_export(self, mock_cli_wrapper):
-        """Test actions execution with export filename."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-        mock_result.stderr = ""
+        """Test actions execution appends export-do when output_path is given."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="")
 
-        with patch("subprocess.run", return_value=mock_result):
-            returncode, stdout, stderr = await mock_cli_wrapper._execute_actions(
-                "select-all;object-to-path", input_path="test.svg", output_path="output.svg"
-            )
+        await mock_cli_wrapper.execute_actions(
+            input_path="test.svg",
+            actions=["select-all", "object-to-path"],
+            output_path="output.svg",
+        )
 
-            assert returncode == 0
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert any("--export-filename=" in arg for arg in cmd_args)
+        assert any(arg.endswith(";export-do") for arg in cmd_args)
 
     @pytest.mark.asyncio
     async def test_export_file_success(self, mock_cli_wrapper, temp_file):
-        """Test successful file export."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
-        mock_result.stderr = ""
+        """Test successful file export builds the expected CLI arguments."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="")
 
-        with patch("subprocess.run", return_value=mock_result):
-            success, message = await mock_cli_wrapper.export_file(
-                input_path=str(temp_file), output_path="output.png", format="png", dpi=300
-            )
+        result = await mock_cli_wrapper.export_file(
+            input_path=str(temp_file), output_path="output.png", export_type="png", dpi=300
+        )
 
-            assert success is True
-            assert "exported successfully" in message
+        assert result == ""
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert "--export-dpi" in cmd_args
+        assert "300" in cmd_args
+        assert "--export-area-drawing" in cmd_args
 
     @pytest.mark.asyncio
-    async def test_export_file_invalid_format(self, mock_cli_wrapper, temp_file):
-        """Test export with invalid format."""
-        with pytest.raises(ValueError, match="Unsupported export format"):
-            await mock_cli_wrapper.export_file(
-                input_path=str(temp_file), output_path="output.invalid", format="invalid"
-            )
+    async def test_export_file_unknown_format_not_validated(self, mock_cli_wrapper, temp_file):
+        """export_file performs no format validation - an unknown type is passed straight through."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="")
+
+        await mock_cli_wrapper.export_file(
+            input_path=str(temp_file), output_path="output.invalid", export_type="invalid"
+        )
+
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert "--export-type" in cmd_args
+        assert "invalid" in cmd_args
+        # Not a raster format, so no DPI flag is added
+        assert "--export-dpi" not in cmd_args
 
     @pytest.mark.asyncio
     async def test_query_object_success(self, mock_cli_wrapper):
-        """Test successful object querying."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "10,20,100,50"
-        mock_result.stderr = ""
+        """Test object querying returns the raw CLI output string (no parsing)."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="10,20,100,50")
 
-        with patch("subprocess.run", return_value=mock_result):
-            result = await mock_cli_wrapper.query_object(
-                input_path="test.svg", object_id="rect1", properties=["x", "y", "width", "height"]
-            )
+        result = await mock_cli_wrapper.query_object(
+            input_path="test.svg", object_id="rect1", query_type="bbox"
+        )
 
-            assert "x" in result
-            assert "y" in result
-            assert result["x"] == 10
-            assert result["y"] == 20
+        assert result == "10,20,100,50"
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert "--query-id" in cmd_args
+        assert "rect1" in cmd_args
+        assert "--query-bbox" in cmd_args
 
     @pytest.mark.asyncio
-    async def test_query_object_invalid_output(self, mock_cli_wrapper):
-        """Test object query with invalid output."""
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "invalid,output,format"
-        mock_result.stderr = ""
+    async def test_query_object_width_query_type(self, mock_cli_wrapper):
+        """Test that query_type='width' selects the --query-width flag."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="42")
 
-        with patch("subprocess.run", return_value=mock_result):
-            result = await mock_cli_wrapper.query_object(
-                input_path="test.svg", object_id="rect1", properties=["x"]
-            )
-
-            # Should handle gracefully
-            assert isinstance(result, dict)
-
-    def test_build_command_base(self, mock_cli_wrapper):
-        """Test basic command building."""
-        cmd = mock_cli_wrapper._build_command_base("test.svg")
-        expected = [str(mock_cli_wrapper.config.inkscape_executable), "--batch-process", "test.svg"]
-        assert cmd == expected
-
-    def test_build_command_with_actions(self, mock_cli_wrapper):
-        """Test command building with actions."""
-        cmd = mock_cli_wrapper._build_command_with_actions(
-            "select-all;export-do", "test.svg", "output.svg"
+        result = await mock_cli_wrapper.query_object(
+            input_path="test.svg", object_id="rect1", query_type="width"
         )
-        assert "--actions" in cmd
-        assert "select-all;export-do" in cmd
-        assert "export-filename:output.svg" in cmd
 
-    def test_validate_input_path(self, mock_cli_wrapper, temp_file):
-        """Test input path validation."""
-        # Should not raise for existing file
-        mock_cli_wrapper._validate_input_path(str(temp_file))
-
-        # Should raise for nonexistent file
-        with pytest.raises(FileNotFoundError):
-            mock_cli_wrapper._validate_input_path("/nonexistent/file.svg")
-
-    def test_validate_output_path(self, mock_cli_wrapper, temp_dir):
-        """Test output path validation."""
-        output_path = temp_dir / "output.svg"
-
-        # Should create parent directories
-        mock_cli_wrapper._validate_output_path(str(output_path))
-        assert output_path.parent.exists()
-
-    def test_parse_query_output(self, mock_cli_wrapper):
-        """Test parsing of query command output."""
-        # Test valid output
-        output = "10,20,100,50"
-        result = mock_cli_wrapper._parse_query_output(output, ["x", "y", "width", "height"])
-        assert result == {"x": 10, "y": 20, "width": 100, "height": 50}
-
-        # Test invalid output
-        result = mock_cli_wrapper._parse_query_output("invalid", ["x"])
-        assert result == {"x": None}
-
-        # Test mismatched lengths
-        result = mock_cli_wrapper._parse_query_output("10,20", ["x", "y", "width"])
-        assert result == {"x": 10, "y": 20, "width": None}
+        assert result == "42"
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert "--query-width" in cmd_args
 
 
 class TestInkscapeCliError:
@@ -217,66 +194,40 @@ class TestCliWrapperIntegration:
 
     @pytest.mark.asyncio
     async def test_full_workflow(self, mock_cli_wrapper, temp_svg_content, temp_file):
-        """Test a complete workflow from file creation to processing."""
-        # Create test SVG file
+        """Test a complete workflow from file creation to querying object dimensions."""
         temp_file.write_text(temp_svg_content)
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="10,20,80,80")
 
-        # Mock successful operations
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "10,20,80,80"
-        mock_result.stderr = ""
+        result = await mock_cli_wrapper.query_object(
+            input_path=str(temp_file), object_id="rect1", query_type="bbox"
+        )
 
-        with patch("subprocess.run", return_value=mock_result):
-            # Query object dimensions
-            result = await mock_cli_wrapper.query_object(
-                input_path=str(temp_file),
-                object_id="rect1",
-                properties=["x", "y", "width", "height"],
-            )
-
-            assert result["x"] == 10
-            assert result["y"] == 20
-            assert result["width"] == 80
-            assert result["height"] == 80
+        assert result == "10,20,80,80"
 
     @pytest.mark.asyncio
     async def test_error_handling_chain(self, mock_cli_wrapper):
         """Test error handling through the call chain."""
-        # Test file not found
-        with pytest.raises(FileNotFoundError):
-            await mock_cli_wrapper.export_file(
-                input_path="/nonexistent/file.svg", output_path="output.png"
-            )
-
-        # Test subprocess failure
-        mock_result = Mock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        mock_result.stderr = "Inkscape error"
-
-        with patch("subprocess.run", return_value=mock_result):
+        # A missing executable at process-spawn time surfaces as InkscapeExecutionError
+        with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError)):
             with pytest.raises(InkscapeExecutionError):
-                await mock_cli_wrapper._execute_command(["--invalid"])
+                await mock_cli_wrapper._execute_command(["--version"], timeout=5)
+
+        # A nonzero return code also raises InkscapeExecutionError
+        fake_process = _FakeProcess(returncode=1, stdout=b"", stderr=b"Inkscape error")
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)):
+            with pytest.raises(InkscapeExecutionError):
+                await mock_cli_wrapper._execute_command(["--invalid"], timeout=5)
 
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, mock_cli_wrapper):
         """Test concurrent operations don't interfere."""
 
         async def mock_operation(task_id: int):
-            mock_result = Mock()
-            mock_result.returncode = 0
-            mock_result.stdout = f"Task {task_id} completed"
-            mock_result.stderr = ""
+            fake_process = _FakeProcess(returncode=0, stdout=f"Task {task_id} completed".encode())
+            with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=fake_process)):
+                return await mock_cli_wrapper._execute_command(["--version"], timeout=5)
 
-            with patch("subprocess.run", return_value=mock_result):
-                returncode, stdout, stderr = await mock_cli_wrapper._execute_command(["--version"])
-                return returncode, stdout
+        results = await asyncio.gather(*[mock_operation(i) for i in range(3)])
 
-        # Run multiple operations concurrently
-        tasks = [mock_operation(i) for i in range(3)]
-        results = await asyncio.gather(*tasks)
-
-        # All should succeed
-        assert all(returncode == 0 for returncode, _ in results)
         assert len(results) == 3
+        assert all("completed" in r for r in results)

@@ -336,6 +336,10 @@ class InkscapeCliWrapper:
             raise InkscapeExecutionError(
                 f"Inkscape executable not found: {self.config.inkscape_executable}"
             ) from None
+        except InkscapeCliError:
+            # Already a well-formed InkscapeTimeoutError/InkscapeExecutionError raised above -
+            # let it propagate as-is instead of re-wrapping it into InkscapeExecutionError.
+            raise
         except Exception as e:
             raise InkscapeExecutionError(f"Command execution failed: {e}") from e
 

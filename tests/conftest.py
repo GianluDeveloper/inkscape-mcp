@@ -87,9 +87,11 @@ def mock_subprocess_run():
 
 
 @pytest.fixture
-def mock_inkscape_path():
-    """Mock Inkscape executable path."""
-    return Path("C:/Program Files/Inkscape/bin/inkscape.exe")
+def mock_inkscape_path(tmp_path):
+    """Mock Inkscape executable path (a real, empty file so existence checks pass)."""
+    exe = tmp_path / "inkscape.exe"
+    exe.write_text("")
+    return exe
 
 
 @pytest.fixture
@@ -120,7 +122,7 @@ def mock_inkscape_detector():
 def mock_successful_inkscape_run():
     """Mock a successful Inkscape execution."""
 
-    def _mock_run(cmd_args, **kwargs):
+    def _mock_run(_cmd_args, **_kwargs):
         mock_result = Mock()
         mock_result.returncode = 0
         mock_result.stdout = '{"success": true, "data": "test output"}'
@@ -134,7 +136,7 @@ def mock_successful_inkscape_run():
 def mock_failed_inkscape_run():
     """Mock a failed Inkscape execution."""
 
-    def _mock_run(cmd_args, **kwargs):
+    def _mock_run(_cmd_args, **_kwargs):
         mock_result = Mock()
         mock_result.returncode = 1
         mock_result.stdout = ""
