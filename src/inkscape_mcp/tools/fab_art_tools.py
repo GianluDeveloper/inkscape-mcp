@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import time
@@ -287,7 +288,7 @@ async def inkscape_fab_art(
                 for pattern in ("*.dxf", "*.svg", "*.png"):
                     for src in src_dir.glob(pattern):
                         target = dest / src.name
-                        shutil.copy2(src, target)
+                        await asyncio.to_thread(shutil.copy2, src, target)
                         copied.append(str(target))
                 staged = {"success": bool(copied), "files": copied, "staging_dir": str(dest)}
                 files = copied
@@ -327,7 +328,7 @@ async def inkscape_fab_art(
             work.mkdir(parents=True, exist_ok=True)
             svg_copy = work / Path(svg_path).name
             if not svg_copy.exists():
-                shutil.copy2(svg_path, svg_copy)
+                await asyncio.to_thread(shutil.copy2, svg_path, svg_copy)
 
             dxf = await _batch_dxf_export(
                 input_dir=work,
