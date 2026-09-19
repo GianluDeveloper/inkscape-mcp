@@ -58,6 +58,47 @@ async def test_native_errors_are_failures_even_with_zero_exit(mock_cli_wrapper, 
             await mock_cli_wrapper._execute_command(["inkscape", "--version"], 5)
 
 
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "No active desktop to run actions on!",
+        "Active window is not available on macOS",
+        "InkscapeApplication::parse_actions: could not find action for: nonexistent-action",
+        "action:transform_translate: parsing arguments failed",
+    ],
+)
+async def test_live_diagnostics_fail_in_either_stream(mock_cli_wrapper, stream, message):
+    streams = {"stdout": b"no output", "stderr": b"Gtk-WARNING: harmless warning\n"}
+    streams[stream] = message.encode()
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=Process(**streams))):
+        with pytest.raises(InkscapeExecutionError, match=message):
+            await mock_cli_wrapper._execute_command(
+                ["inkscape", "--active-window", "--actions=query-all"], 5
+            )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "no output",
+        "42\n",
+        "Error:,10,20,30,40\n",
+        "<svg><text>No active desktop to run actions on!</text></svg>",
+        "<svg><text>InkscapeApplication::parse_actions: invalid action</text></svg>",
+    ],
+)
+async def test_live_data_is_not_mistaken_for_diagnostics(mock_cli_wrapper, output):
+    process = Process(stdout=output.encode(), stderr=b"Gtk-WARNING: harmless warning\n")
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        assert (
+            await mock_cli_wrapper._execute_command(
+                ["inkscape", "--active-window", "--actions=query-all"], 5
+            )
+            == output
+        )
+
+
 @pytest.mark.parametrize(
     "action",
     [
@@ -247,3 +288,55 @@ async def test_truncated_binary_export_preserves_destination(
         await mock_cli_wrapper.export_file(str(sample_svg_file), str(destination), export_type)
     assert destination.read_bytes() == original
     assert not list(tmp_path.glob("inkscape-mcp-*"))
+
+
+async def test_repeated_cancellation_waits_for_child_cleanup(mock_cli_wrapper):
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+
+    class SlowCleanupProcess(Process):
+        async def communicate(self):
+            if not self.killed:
+                started.set()
+                await asyncio.Event().wait()
+            cleaning.set()
+            await allow_cleanup.wait()
+            return b"", b""
+
+    process = SlowCleanupProcess(returncode=None)
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        task = asyncio.create_task(mock_cli_wrapper._execute_command(["inkscape", "--version"], 5))
+        await started.wait()
+        task.cancel()
+        await cleaning.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        finished_before_cleanup = task.done()
+        allow_cleanup.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert not finished_before_cleanup
+    assert process.killed and process.reaped
+    assert mock_cli_wrapper._slots._value == mock_cli_wrapper.config.max_concurrent_processes
+
+
+async def test_pipe_failure_kills_and_reaps_child(mock_cli_wrapper):
+    class BrokenPipeProcess(Process):
+        async def communicate(self):
+            if not self.killed:
+                raise OSError("failed to read native process output")
+            return b"", b""
+
+    process = BrokenPipeProcess(returncode=None)
+    with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=process)):
+        with pytest.raises(InkscapeExecutionError, match="failed to read native process output"):
+            await mock_cli_wrapper._execute_command(["inkscape", "--version"], 5)
+    assert process.killed and process.reaped
+
+
+async def test_missing_action_argument_rejected_before_spawn(mock_cli_wrapper):
+    with patch("asyncio.create_subprocess_exec", AsyncMock()) as spawn:
+        with pytest.raises(InkscapeExecutionError, match="requires an action"):
+            await mock_cli_wrapper._execute_command(["inkscape", "--actions"], 5)
+        spawn.assert_not_awaited()

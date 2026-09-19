@@ -18,6 +18,21 @@ from inkscape_mcp.inkscape_detector import InkscapeDetector
 class TestInkscapeDetector:
     """Test InkscapeDetector class functionality."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_executable_override(self, monkeypatch):
+        """Platform discovery tests must not inherit the developer/CI override."""
+        monkeypatch.delenv("INKSCAPE_PATH", raising=False)
+
+    def test_explicit_environment_override(self, monkeypatch):
+        monkeypatch.setenv("INKSCAPE_PATH", "/custom/bin/inkscape")
+        detector = InkscapeDetector()
+        with (
+            patch.object(detector, "_validate_executable", return_value=True),
+            patch.object(detector, "_detect_linux") as discover,
+        ):
+            assert detector.detect_inkscape_installation() == "/custom/bin/inkscape"
+        discover.assert_not_called()
+
     def test_initialization(self):
         """Test detector initializes correctly."""
         detector = InkscapeDetector()

@@ -5,6 +5,7 @@ Requires Node.js and npx on PATH (`npx -y @anthropic-ai/mcpb`).
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -14,6 +15,11 @@ from pathlib import Path
 
 def _npx_argv(extra: list[str]) -> list[str]:
     """Invoke npx via node + npx-cli.js (works when `npx` is not a real Win32 executable)."""
+    if os.name != "nt":
+        npx = shutil.which("npx")
+        if not npx:
+            raise FileNotFoundError("npx not found on PATH. Install Node.js/npm to pack MCPB.")
+        return [npx, *extra]
     node = shutil.which("node")
     if not node:
         raise FileNotFoundError("Node.js not found on PATH. Install Node.js to run mcpb pack.")

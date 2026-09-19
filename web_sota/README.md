@@ -1,73 +1,73 @@
-# React + TypeScript + Vite
+# Inkscape MCP dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Optional React, TypeScript, and Vite frontend for the Inkscape MCP HTTP backend.
+It provides status and logs, tool discovery, SVG workflows, help, and optional
+model-provider settings. The MCP server also works independently through stdio.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Complete the Python and native Inkscape setup in
+[Installation](../INSTALL.md). Start the backend from the repository root:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+uv run inkscape-mcp --mode http --host 127.0.0.1 --port 11028
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+In a second terminal, use Bun 1.3.14, as pinned by `packageManager`:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd web_sota
+bun install --frozen-lockfile
+bun run dev
 ```
+
+Open `http://127.0.0.1:11029`. The
+[Vite configuration](vite.config.ts) proxies `/api`, `/v1`, and `/mcp` to
+`http://127.0.0.1:11028`. The backend command sets this port explicitly;
+the server's general HTTP default is `11027`.
+
+Local model services are optional. Configure a provider in the dashboard only
+for features that need one. These settings do not enable MCP client sampling;
+see [Sampling](../docs/AI_SAMPLING.md).
+
+## Checks and build
+
+Run from this directory:
+
+```bash
+bun run lint
+bun run build
+```
+
+The build runs TypeScript checks and writes Vite assets to `dist/`.
+`bun run preview` previews those assets locally. A separate deployment must
+route backend requests appropriately; the development proxy is not a production
+reverse-proxy configuration.
+
+An optional browser smoke test checks backend health and frontend loading:
+
+```bash
+bunx playwright install chromium
+bunx playwright test e2e/smoke.spec.ts
+```
+
+[Playwright configuration](playwright.config.ts) starts the backend and frontend
+when their ports are available, or reuses existing servers. It requires the
+Python setup and Bun on `PATH`. Frontend lint and build run in
+[CI](../.github/workflows/ci.yml); browser tests are a separate check.
+
+## Source map
+
+| Path | Responsibility |
+| --- | --- |
+| `src/pages/` | Dashboard screens and workflow forms |
+| `src/components/` | Layout, dialogs, and reusable UI |
+| `src/api/`, `src/lib/` | Backend requests, settings, and shared helpers |
+| `e2e/` | Playwright smoke and demonstration scripts |
+| `../src/inkscape_mcp/app.py` | Backend REST routes |
+| `../native/` | Separate Tauri desktop wrapper source |
+
+The authoritative agent-accessible tool contract is
+[TOOLS.md](../docs/TOOLS.md). Dashboard-only REST helpers, including layer and
+animation routes, are not standalone MCP tools. See
+[Development](../docs/DEVELOPMENT.md) for server and native desktop validation.

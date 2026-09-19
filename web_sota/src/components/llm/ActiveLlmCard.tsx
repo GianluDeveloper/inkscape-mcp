@@ -151,8 +151,25 @@ export function ActiveLlmCard() {
 
   useEffect(() => {
     if (!selected) return;
-    void reloadModels(selected);
-  }, [selected, reloadModels]);
+    let cancelled = false;
+    fetchModels(selected)
+      .then((result) => {
+        if (cancelled) return;
+        setModels(result.models);
+        setModelsSource(result.source);
+        setModel((current) =>
+          current && result.models.includes(current) ? current : "",
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setModels([]);
+        setModelsSource("none");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   async function chooseProvider(id: string) {
     setSelected(id);

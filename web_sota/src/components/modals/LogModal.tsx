@@ -1,6 +1,6 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { ScrollText, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import API_BASE from "@/lib/api";
 
 interface Props {
@@ -11,23 +11,22 @@ interface Props {
 export function LogModal({ open, onClose }: Props) {
   const [logs, setLogs] = useState<string>("Loading...");
 
-  const fetchLogs = useCallback(async () => {
-    try {
-      const r = await fetch(`${API_BASE}/api/logs`);
-      if (!r.ok) {
-        setLogs(`HTTP ${r.status}`);
-        return;
-      }
-      const data = await r.json();
-      setLogs(JSON.stringify(data, null, 2));
-    } catch (e) {
-      setLogs(String(e));
-    }
-  }, []);
-
   useEffect(() => {
-    if (open) fetchLogs();
-  }, [open, fetchLogs]);
+    if (!open) return;
+    const controller = new AbortController();
+    fetch(`${API_BASE}/api/logs`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return JSON.stringify(await response.json(), null, 2);
+      })
+      .then((result) => {
+        if (!controller.signal.aborted) setLogs(result);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setLogs(String(error));
+      });
+    return () => controller.abort();
+  }, [open]);
 
   return (
     <Dialog.Root

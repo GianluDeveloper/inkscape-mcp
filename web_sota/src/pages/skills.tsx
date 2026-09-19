@@ -12,8 +12,14 @@ interface SkillInfo {
 export function Skills() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState<{
+    name: string;
+    content: string;
+  } | null>(null);
+  const [loadingList, setLoadingList] = useState(true);
+  const loading =
+    loadingList || (selected !== null && detail?.name !== selected);
+  const content = detail?.name === selected ? detail.content : "";
 
   useEffect(() => {
     fetch(`${API_BASE}/api/skills`)
@@ -23,17 +29,28 @@ export function Skills() {
         if (d.skills?.length > 0) setSelected(d.skills[0].name);
       })
       .catch(() => setSkills([]))
-      .finally(() => setLoading(false));
+      .finally(() => setLoadingList(false));
   }, []);
 
   useEffect(() => {
     if (!selected) return;
-    setLoading(true);
-    fetch(`${API_BASE}/api/skills/${selected}`)
-      .then((r) => r.json())
-      .then((d) => setContent(d.content ?? ""))
-      .catch(() => setContent(""))
-      .finally(() => setLoading(false));
+    const controller = new AbortController();
+    fetch(`${API_BASE}/api/skills/${encodeURIComponent(selected)}`, {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<{ content?: string }>;
+      })
+      .then((result) => {
+        if (!controller.signal.aborted)
+          setDetail({ name: selected, content: result.content ?? "" });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setDetail({ name: selected, content: "" });
+      });
+    return () => controller.abort();
   }, [selected]);
 
   return (

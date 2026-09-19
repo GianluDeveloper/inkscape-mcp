@@ -82,30 +82,34 @@ export function Dashboard() {
   const [attempt, setAttempt] = useState(0);
   const [restarting, setRestarting] = useState(false);
 
-  const load = useCallback(async () => {
-    setErr(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/health`);
-      if (!res.ok) {
-        setErr(`HTTP ${res.status}`);
-        setH(null);
-        setOnline(false);
-        return;
-      }
-      const data: HealthPayload = await res.json();
-      setH(data);
-      setErr(null);
-      setAttempt(0);
-      setOnline(true);
-    } catch (e) {
-      setH(null);
-      setErr(e instanceof Error ? e.message : "Failed");
-      setOnline(false);
-    }
-  }, [setOnline]);
+  const load = useCallback(
+    (signal?: AbortSignal) => {
+      return fetch(`${API_BASE}/api/health`, { signal })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json() as Promise<HealthPayload>;
+        })
+        .then((data) => {
+          if (signal?.aborted) return;
+          setH(data);
+          setErr(null);
+          setAttempt(0);
+          setOnline(true);
+        })
+        .catch((error: unknown) => {
+          if (signal?.aborted) return;
+          setH(null);
+          setErr(error instanceof Error ? error.message : "Failed");
+          setOnline(false);
+        });
+    },
+    [setOnline],
+  );
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   useEffect(() => {

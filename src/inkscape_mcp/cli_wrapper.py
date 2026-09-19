@@ -395,7 +395,9 @@ class InkscapeCliWrapper:
             for i, arg in enumerate(command):
                 if arg.startswith("--actions="):
                     validate_actions(arg.partition("=")[2])
-                elif arg == "--actions" and i + 1 < len(command):
+                elif arg == "--actions":
+                    if i + 1 == len(command):
+                        raise ValueError("--actions requires an action argument")
                     validate_actions(command[i + 1])
                 elif arg == "--actions-file" or arg.startswith("--actions-file="):
                     raise ValueError(
@@ -423,18 +425,16 @@ class InkscapeCliWrapper:
                 )
                 try:
                     stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                except (TimeoutError, asyncio.CancelledError) as exc:
-                    try:
-                        process.kill()
-                    except ProcessLookupError:
-                        pass
-                    await process.communicate()
-                    await process.wait()
-                    if isinstance(exc, asyncio.CancelledError):
-                        raise
-                    raise InkscapeTimeoutError(
-                        f"Command timed out after {timeout} seconds"
-                    ) from exc
+                except (Exception, asyncio.CancelledError) as exc:
+                    # Reap on pipe failures as well as timeouts/cancellation.
+                    # Repeated cancellations must not release the process slot
+                    # or delete a staged export while its child is still alive.
+                    await self._terminate_and_reap(process)
+                    if isinstance(exc, TimeoutError):
+                        raise InkscapeTimeoutError(
+                            f"Command timed out after {timeout} seconds"
+                        ) from exc
+                    raise
                 output = stdout.decode("utf-8", errors="replace")
                 diagnostics = stderr.decode("utf-8", errors="replace")
                 # Several CLI errors (including unknown actions) still exit with
@@ -447,11 +447,26 @@ class InkscapeCliWrapper:
                     r"cannot be opened|failed to create document|tracing failed|"
                     r"did not find object with id|"
                     r"action:[^\n]*(?:selection empty|expected argument|parsing arguments failed)|"
+                    r"no active desktop to run|active window is not available on macOS|"
                     r"emergency save activated|segmentation fault)",
                     diagnostics,
                 )
-                if process.returncode != 0 or fatal:
-                    detail = (diagnostics or output).strip()[-8000:]
+                # The live-window bridge also writes failures to stdout while
+                # returning status zero. Match actual diagnostic lines here:
+                # query IDs and SVG text may legitimately contain error words.
+                fatal_output = re.search(
+                    r"(?im)^\s*(?:"
+                    r"no active desktop to run\b[^\n]*|"
+                    r"active window is not available on macOS\b[^\n]*|"
+                    r"(?:InkscapeApplication::)?parse_actions:[^\n]*(?:could not find|invalid)[^\n]*|"
+                    r"action:[^\n]*(?:selection empty|expected argument|parsing arguments failed)[^\n]*"
+                    r")$",
+                    output,
+                )
+                if process.returncode != 0 or fatal or fatal_output:
+                    detail = "\n".join(
+                        part.strip()[-4000:] for part in (diagnostics, output) if part.strip()
+                    )
                     raise InkscapeExecutionError(
                         f"Inkscape command failed with return code {process.returncode}: {detail}"
                     )
@@ -466,6 +481,29 @@ class InkscapeCliWrapper:
                 raise
             except Exception as exc:
                 raise InkscapeExecutionError(f"Command execution failed: {exc}") from exc
+
+    @staticmethod
+    async def _terminate_and_reap(process: asyncio.subprocess.Process) -> None:
+        async def cleanup() -> None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await process.communicate()
+            finally:
+                await process.wait()
+
+        cleanup_task = asyncio.create_task(cleanup())
+        cancelled = False
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
     def _get_environment(self) -> dict[str, str]:
         """

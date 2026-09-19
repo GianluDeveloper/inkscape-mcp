@@ -13,11 +13,11 @@ services:
     build:
       context: .
       target: production
-    image: ghcr.io/sandraschi/inkscape-mcp:latest
+    image: inkscape-mcp:local
     container_name: inkscape-mcp
     ports:
-      - "10900:10900"
-      - "9074:9074"
+      - "127.0.0.1:10900:10900"
+      - "127.0.0.1:9074:9074"
     environment:
       MCP_HOST: 0.0.0.0
       MCP_PORT: "10900"
@@ -28,6 +28,7 @@ services:
       INKSCAPE_MCP_LOG_LEVEL: INFO
     volumes:
       - inkscape-mcp-logs:/app/logs
+      - inkscape-mcp-data:/data
     labels:
       promtail.job: inkscape-mcp
     restart: unless-stopped
@@ -43,7 +44,7 @@ services:
     image: prom/prometheus:v3.11.3
     container_name: inkscape-mcp-prometheus
     ports:
-      - "9092:9090"
+      - "127.0.0.1:9092:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -58,7 +59,7 @@ services:
     image: grafana/loki:3.7.1
     container_name: inkscape-mcp-loki
     ports:
-      - "3102:3100"
+      - "127.0.0.1:3102:3100"
     volumes:
       - ./monitoring/loki/loki.yml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki
@@ -83,7 +84,7 @@ services:
     image: grafana/grafana:13.0.1
     container_name: inkscape-mcp-grafana
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -97,6 +98,7 @@ services:
 
 volumes:
   inkscape-mcp-logs:
+  inkscape-mcp-data:
   prometheus-data:
   loki-data:
   grafana-data:

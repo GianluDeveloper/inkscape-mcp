@@ -1,4 +1,4 @@
-"""FastMCP 3.1+ prompts and resources for inkscape-mcp (fleet SOTA alignment).
+"""Workflow prompts and capability resources for the public Inkscape MCP API.
 
 Registers MCP prompts (prompt://inkscape/...) and resources (resource://inkscape/...)
 so clients that list prompts/resources see real entries, not only MCPB bundle text.
@@ -19,7 +19,7 @@ def register_prompts_and_resources(mcp: FastMCP) -> None:
     def prompt_svg_file_workflow() -> str:
         """Guide file-level SVG workflows (load, convert, validate)."""
         return """Guide the user through Inkscape MCP file operations.
-1. Call inkscape_system(operation="status") or operation="version" to confirm Inkscape is reachable.
+1. Call inkscape_system(operation="status") and inspect data.inkscape.available, or use operation="version".
 2. Use inkscape_file(operation="info", input_path="...") for format and basic metadata.
 3. Use inkscape_file(operation="validate", input_path="...") before heavy edits.
 4. Use inkscape_file(operation="convert", input_path="...", output_path="...", format="pdf|png|...") for exports.
@@ -30,9 +30,10 @@ def register_prompts_and_resources(mcp: FastMCP) -> None:
         """Guide vector edits via inkscape_vector."""
         return """Guide vector editing with inkscape_vector (Inkscape CLI --actions).
 1. Start from inkscape_analysis(operation="dimensions", input_path="...") or "statistics" for context.
-2. Typical flows: path_simplify, path_clean, apply_boolean (union/intersect with operation_type), trace_image for raster sources.
-3. For barcodes/QR: inkscape_vector(operation="generate_barcode_qr", output_path="...", barcode_data="...") via kwargs your client passes through.
-4. Always pass input_path and output_path when the operation writes a file; verify success in the tool response dict."""
+2. Use tools/list for exact public arguments. Typical flows include path_simplify, path_clean, and apply_boolean with operation_type="union|difference|intersection|exclusion" and object_ids or select_all.
+3. Create explicit shapes and editable text with construct_svg(output_path="...", svg_content="<svg xmlns='http://www.w3.org/2000/svg'>...</svg>").
+4. For live editing, use inkscape_system operations list_documents, active_document, and insert_svg with the intended session_id. Install the native extension explicitly before the first edit.
+5. File edits need input_path and output_path; inspect success and output paths. Live edits require data.verified and do not automatically save the document."""
 
     @mcp.prompt("prompt://inkscape/analysis-workflow")
     def prompt_analysis_workflow() -> str:
@@ -47,12 +48,12 @@ def register_prompts_and_resources(mcp: FastMCP) -> None:
     @mcp.prompt("prompt://inkscape/sampling-agentic-workflow")
     def prompt_sampling_agentic_workflow() -> str:
         """Explain SEP-1577 / ctx.sample agentic tools."""
-        return """When the MCP host supports sampling (FastMCP 3.1 SEP-1577):
-- generate_svg: client LLM produces SVG via multi-step sampling; requires ctx.
-- agentic_inkscape_workflow, intelligent_vector_processing, conversational_inkscape_assistant: orchestration helpers (see docs/AI_SAMPLING.md).
+        return """When the MCP client supports sampling and sampling.tools:
+- generate_svg: the client model produces SVG through sampling; FastMCP injects Context, so do not provide ctx in JSON.
+- agentic_inkscape_workflow, intelligent_vector_processing, conversational_inkscape_assistant return plans or guidance, not completed editing workflows (see docs/AI_SAMPLING.md).
 
-If the tool returns "Sampling context unavailable", switch to explicit inkscape_* tool calls instead of agentic tools.
-Optional: list_local_models() to see Ollama/LM Studio; REST /api/generate-svg uses Ollama when configured (dashboard docs)."""
+If sampling is unavailable, use inkscape_vector(operation="construct_svg") and explicit editing calls.
+Optional: list_local_models() discovers local providers. Dashboard generation uses its configured model services separately and does not add sampling capability to an MCP client."""
 
     @mcp.prompt("prompt://inkscape/heraldry-workflow")
     def prompt_heraldry_workflow() -> str:
@@ -63,12 +64,14 @@ Confirm output path is under an allowed directory. Combine with inkscape_file / 
     @mcp.resource("resource://inkscape/capabilities")
     def resource_capabilities() -> str:
         """Static capability summary for indexers and clients."""
-        return """inkscape-mcp (FastMCP 3.1+)
-Tools: inkscape_file, inkscape_vector, inkscape_analysis, inkscape_system, list_local_models, generate_heraldry
-Optional (sampling): generate_svg, agentic_inkscape_workflow, intelligent_vector_processing, conversational_inkscape_assistant
-Transports: stdio (MCP_TRANSPORT=stdio), HTTP (MCP_TRANSPORT=http, MCP_PORT default 11028, path /mcp)
-REST (when HTTP + fastapi extra): /api/health, /api/help, /api/logs, /api/chat (no local LLM), /api/generate-svg (Ollama)
-Web UI dev: Vite proxy to backend (see web_sota; fleet ports 11028/11029).
+        return """inkscape-mcp 2.6.0 (FastMCP >=3.4.4,<4)
+Tools: inkscape_file, inkscape_vector, inkscape_analysis, inkscape_render, inkscape_validation, inkscape_system, inkscape_fleet, inkscape_fab_art, inkscape_sim_art, list_local_models, llm_ops, generate_heraldry.
+Sampling tools (when their module loads): generate_svg, agentic_inkscape_workflow, intelligent_vector_processing, conversational_inkscape_assistant. They require client sampling.tools; planning helpers return plans rather than executing every described edit.
+Use tools/list for exact operations and arguments. Installed extensions and internal Python helpers are not automatically registered as MCP tools.
+Live Linux desktop: inkscape_system operations install_live_extension, list_documents, new_document, open_document, active_document, insert_svg, draw_test, save_document, save_copy, close_document. Retain session_id to address a managed window. Restart previously open windows after extension installation. Successful edits require data.verified; uncertain edits must not be retried automatically.
+Transports: stdio by default; HTTP with MCP_TRANSPORT=http, MCP_PORT default 11027, path /mcp.
+HTTP REST dashboard includes /api/health, /api/help, /api/logs, /api/chat, /api/generate-svg. Model-backed features use separately configured providers.
+Web UI development explicitly uses backend 11028 and frontend 11029; see web_sota/README.md.
 Prompts: prompt://inkscape/svg-file-workflow, vector-editing-workflow, analysis-workflow, sampling-agentic-workflow, heraldry-workflow
 Resources: resource://inkscape/capabilities, resource://inkscape/skills"""
 

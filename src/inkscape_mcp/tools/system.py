@@ -1,231 +1,19 @@
-"""System operations and diagnostics for Inkscape MCP server.
+"""System diagnostics, action discovery, and addressed live document workflows.
 
-PORTMANTEAU PATTERN RATIONALE:
-Consolidates 7 system management operations into single interface. Prevents tool explosion
-while maintaining
-clean separation of concerns. Follows FastMCP 2.14.1+ SOTA standards.
-
-SUPPORTED OPERATIONS:
-- status: Get comprehensive server and Inkscape status
-- help: Get help information and tool descriptions
-- diagnostics: Run diagnostic checks and system readiness
-- version: Get server version and protocol information
-- config: View current configuration settings
-- list_extensions: Discover and list available Inkscape extensions
-- execute_extension: Execute Inkscape extensions with parameters
-
-OPERATIONS DETAIL:
-
-**Status & Health**:
-  - status: Get comprehensive server and Inkscape status, tool availability, and system health
-
-**Version Information**:
-  - version: Get server version, protocol version, architecture, and Inkscape requirements
-
-**Diagnostics**:
-  - diagnostics: Run diagnostic checks to verify configuration, dependencies, and system readiness
-
-**Help & Documentation**:
-  - help: Get comprehensive help information including tool descriptions and getting started guide
-
-**Extension Management**:
-  - list_extensions: Discover and list all available Inkscape extensions with metadata
-  - execute_extension: Execute Inkscape extensions with parameters and file I/O
-
-**Configuration**:
-  - config: View current configuration including Inkscape executable path, timeouts, and settings
-
-Args:
-    operation (Literal, required): The system operation to perform. Must be one of:
-        "status", "help", "diagnostics",
-        "version", "config", "list_extensions", "execute_extension".
-        - "status": Get server and Inkscape status (no additional parameters)
-        - "help": Get help information and tool descriptions (no additional parameters)
-        - "diagnostics": Run diagnostic checks (no additional parameters)
-        - "version": Get version information (no additional parameters)
-        - "config": View current configuration (no additional parameters)
-        - "list_extensions": List available Inkscape extensions (no additional parameters)
-        - "execute_extension": Execute Inkscape extension (requires: extension_id, additional
-        parameters)
-
-    extension_id (str | None): Identifier for Inkscape extension. Required for:
-        execute_extension operation.
-
-    cli_wrapper (Any): Injected CLI wrapper dependency. Required. Handles Inkscape command
-        execution.
-
-    config (Any): Injected configuration dependency. Required. Contains Inkscape executable path
-        and settings.
-
-Returns:
-    FastMCP 2.14.1+ Enhanced Response Pattern with success/error states, execution timing,
-    next steps, and recovery options for failed operations.
-
-Examples:
-    # Get server status
-    result = await inkscape_system(
-        operation="status"
-    )
-
-    # Get help information
-    result = await inkscape_system(
-        operation="help"
-    )
-
-    # Run diagnostics
-    result = await inkscape_system(
-        operation="diagnostics"
-    )
-
-    Success Response (status operation):
-    {
-      "success": true,
-      "operation": "status",
-      "summary": "System status retrieved successfully",
-      "result": {
-        "data": {
-          "server": {
-            "name": "Inkscape MCP Server",
-            "version": "1.1.0",
-            "status": "running"
-          },
-          "inkscape": {
-            "available": true,
-            "version": "Inkscape 1.2.1",
-            "executable": "C:\\Program Files\\Inkscape\\bin\\inkscape.exe"
-          },
-          "tools": {
-            "file": "available",
-            "vector": "available",
-            "analysis": "available",
-            "system": "available"
-          }
-        },
-        "execution_time_ms": 45.67
-      },
-      "next_steps": ["Use inkscape_file for basic operations",
-        "Run diagnostics if issues detected"],
-      "context": {
-        "operation_details": "All systems operational"
-      },
-      "suggestions": ["Verify Inkscape version meets requirements",
-        "Check configuration if tools unavailable"],
-      "follow_up_questions": ["Need help getting started?", "Experiencing any issues?"]
-    }
-
-    Success Response (help operation):
-    {
-      "success": true,
-      "operation": "help",
-      "summary": "Help information retrieved",
-      "result": {
-        "data": {
-          "server": "Inkscape MCP Server",
-          "description": "Professional vector graphics and SVG editing through Model Context
-            Protocol",
-          "tools": [
-            "inkscape_file: Basic file operations",
-            "inkscape_vector: Advanced vector operations",
-            "inkscape_analysis: Document analysis",
-            "inkscape_system: System operations"
-          ],
-          "getting_started": [
-            "Ensure Inkscape 1.0+ is installed",
-            "Use inkscape_file for basic operations",
-            "Use inkscape_vector for advanced vector editing"
-          ]
-        },
-        "execution_time_ms": 12.34
-      },
-      "next_steps": ["Try inkscape_file load operation", "Explore inkscape_vector operations"],
-      "context": {
-        "operation_details": "Complete tool reference available"
-      },
-      "suggestions": ["Start with file operations", "Progress to vector operations"],
-      "follow_up_questions": ["Which operation would you like to try first?",
-        "Need examples for specific operations?"]
-    }
-
-    Error Response (Error Recovery Pattern):
-    {
-      "success": false,
-      "operation": "operation_name",
-      "error": "Error type (e.g., ValueError)",
-      "message": "Human-readable error description",
-      "recovery_options": ["Verify operation name is correct", "Check configuration is loaded",
-        "Ensure Inkscape is installed"],
-      "diagnostic_info": {
-        "config_loaded": false,
-        "inkscape_available": false,
-        "operation_valid": true
-      },
-      "alternative_solutions": ["Run diagnostics operation", "Check server logs",
-        "Verify installation"]
-    }
-
-Examples:
-    # Get comprehensive system status
-    result = await inkscape_system(
-        operation="status"
-    )
-
-    # Get version information
-    result = await inkscape_system(
-        operation="version"
-    )
-
-    # Run diagnostic checks
-    result = await inkscape_system(
-        operation="diagnostics"
-    )
-
-    # Get help information
-    result = await inkscape_system(
-        operation="help"
-    )
-
-    # View current configuration
-    result = await inkscape_system(
-        operation="config"
-    )
-
-Errors:
-    - ValueError: Invalid operation or parameter values
-        Recovery options:
-        - Verify operation is one of: status, help, diagnostics, version, config
-        - Check operation name spelling and case sensitivity
-        - Ensure no additional parameters are provided for system operations
-
-    - FileNotFoundError: Configuration file not found
-        Recovery options:
-        - Verify configuration file exists in expected location
-        - Check file permissions (read access required)
-        - Ensure configuration is properly initialized
-        - Run diagnostics to identify configuration issues
-
-    - PermissionError: Insufficient permissions for system operations
-        Recovery options:
-        - Check user permissions for reading configuration
-        - Verify file system permissions
-        - Run with appropriate user privileges
-        - Check antivirus or security software blocking access
-
-    - ConnectionError: Cannot connect to Inkscape or system services
-        Recovery options:
-        - Verify Inkscape installation (run inkscape --version manually)
-        - Check Inkscape executable path in configuration
-        - Ensure Inkscape is accessible from command line
-        - Run diagnostics operation to identify connection issues
+Public operations are exposed by the FastMCP wrapper in main.py.
+See docs/TOOLS.md for parameters, platform requirements, and limitations.
 """
 
 import logging
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
 
+from .. import __version__
 from ..utils.execution_mode import describe_execution_mode
 from ..utils.telemetry import set_execution_mode
 
@@ -252,6 +40,17 @@ async def inkscape_system(
         "config",
         "execution_mode",
         "hands_in_command",
+        "active_document",
+        "insert_svg",
+        "draw_test",
+        "install_live_extension",
+        "save_document",
+        "save_copy",
+        "close_document",
+        "list_actions",
+        "list_documents",
+        "open_document",
+        "new_document",
         "list_extensions",
         "execute_extension",
         "self_terminate",
@@ -261,6 +60,14 @@ async def inkscape_system(
     _input_file: str | None = None,
     _output_file: str | None = None,
     action: str = "",
+    svg_content: str = "",
+    text: str = "Prova MCP OK",
+    search: str = "",
+    limit: int = 100,
+    offset: int = 0,
+    input_path: str = "",
+    output_path: str = "",
+    session_id: str = "desktop",
     cli_wrapper: Any = None,
     config: Any = None,
 ) -> dict[str, Any]:
@@ -268,6 +75,40 @@ async def inkscape_system(
     start_time = time.time()
 
     try:
+        if operation in {"list_documents", "open_document", "new_document"}:
+            from ..utils import document_sessions
+
+            if operation == "list_documents":
+                data = await document_sessions.list_documents(cli_wrapper, config)
+                message = f"Found {data['count']} Inkscape document sessions"
+            elif operation == "open_document":
+                data = await document_sessions.open_document(input_path, cli_wrapper, config)
+                message = "Opened SVG in a managed Inkscape document session"
+            else:
+                data = await document_sessions.new_document(output_path, cli_wrapper, config)
+                message = "Created SVG and opened a managed Inkscape document session"
+            return SystemResult(
+                success=True,
+                operation=operation,
+                message=message,
+                data=data,
+                execution_time_ms=(time.time() - start_time) * 1000,
+            ).model_dump()
+
+        if operation == "list_actions":
+            from ..utils.action_catalog import list_actions
+
+            data = await list_actions(
+                cli_wrapper=cli_wrapper, config=config, search=search, limit=limit, offset=offset
+            )
+            return SystemResult(
+                success=True,
+                operation=operation,
+                message=f"Retrieved {data['returned']} of {data['matched_actions']} matching CLI actions",
+                data=data,
+                execution_time_ms=(time.time() - start_time) * 1000,
+            ).model_dump()
+
         if operation == "status":
             # Get server and Inkscape status
             inkscape_available = False
@@ -290,9 +131,8 @@ async def inkscape_system(
                 data={
                     "server": {
                         "name": "Inkscape MCP Server",
-                        "version": "2.6.0",
+                        "version": __version__,
                         "status": "running",
-                        "agent_lab_phase": 6,
                     },
                     "inkscape": {
                         "available": inkscape_available,
@@ -325,8 +165,58 @@ async def inkscape_system(
                 execution_time_ms=(time.time() - start_time) * 1000,
             ).model_dump()
 
+        elif operation == "install_live_extension":
+            from inkscape_mcp.utils.live_extension import install_live_extension
+
+            data = install_live_extension(config)
+            return SystemResult(
+                success=True,
+                operation=operation,
+                message="Installed the live editing extension; restart existing Inkscape windows once",
+                data=data,
+                execution_time_ms=(time.time() - start_time) * 1000,
+            ).model_dump()
+
+        elif operation in {"save_document", "save_copy", "close_document"}:
+            from inkscape_mcp.utils.document_lifecycle import document_lifecycle
+
+            data = await document_lifecycle(operation, session_id, output_path, cli_wrapper, config)
+            return SystemResult(
+                success=True,
+                operation=operation,
+                message=data["message"],
+                data=data,
+                execution_time_ms=(time.time() - start_time) * 1000,
+            ).model_dump()
+
+        elif operation in {"active_document", "insert_svg", "draw_test"}:
+            from inkscape_mcp.utils import live_document
+
+            if cli_wrapper is None or config is None:
+                raise ValueError("Inkscape CLI is not configured")
+            if operation == "active_document":
+                data = await live_document.active_document(cli_wrapper, config, session_id)
+                message = "Read the active Inkscape document, including unsaved content"
+            else:
+                content = (
+                    live_document.build_test_svg(text) if operation == "draw_test" else svg_content
+                )
+                data = await live_document.insert_svg(content, cli_wrapper, config, session_id)
+                message = (
+                    "Inserted editable objects and verified them in the active Inkscape document"
+                )
+            return SystemResult(
+                success=True,
+                operation=operation,
+                message=message,
+                data=data,
+                execution_time_ms=(time.time() - start_time) * 1000,
+            ).model_dump()
+
         elif operation == "hands_in_command":
-            if not action:
+            from inkscape_mcp.utils.inkscape_actions import validate_actions
+
+            if not action or not validate_actions(action):
                 return SystemResult(
                     success=False,
                     operation="hands_in_command",
@@ -339,19 +229,37 @@ async def inkscape_system(
             try:
                 # Never allow callers to corrupt the bridge's internal start/end
                 # state; it is managed by --active-window itself (upstream #4765).
-                from inkscape_mcp.utils.inkscape_actions import validate_actions
-
                 validate_actions(action)
-                # Attempt --active-window: send actions to a running Inkscape GUI
+                if cli_wrapper is None or config is None or not config.inkscape_executable:
+                    raise ValueError("Inkscape CLI is not configured")
+                requested_session = session_id or "desktop"
+                command = [str(config.inkscape_executable), "--active-window"]
+                if requested_session != "desktop":
+                    from inkscape_mcp.utils.document_sessions import get_session
+
+                    target = await get_session(requested_session, cli_wrapper, config)
+                    if not target.get("managed") or not target.get("app_id_tag"):
+                        raise ValueError(
+                            "The requested managed session has no application identifier"
+                        )
+                    command.append(f"--app-id-tag={target['app_id_tag']}")
+                # The tagged active-window command reaches only this managed
+                # instance. Unknown/closed sessions must never fall back to the
+                # untagged desktop; legacy desktop CLI remains cross-platform.
+                command.extend(["--actions", action])
                 result = await cli_wrapper._execute_command(
-                    [str(config.inkscape_executable), "--active-window", "--actions", action],
+                    command,
                     config.process_timeout,
                 )
                 return SystemResult(
                     success=True,
                     operation="hands_in_command",
                     message=f"Sent action to active Inkscape window: {action[:120]}",
-                    data={"action": action, "response": result.strip()[:500]},
+                    data={
+                        "action": action,
+                        "session_id": requested_session,
+                        "response": result.strip()[:500],
+                    },
                     execution_time_ms=(time.time() - start_time) * 1000,
                 ).model_dump()
             except Exception as exc:
@@ -361,7 +269,8 @@ async def inkscape_system(
                     message=f"Hands-in command failed: {exc}. Is Inkscape GUI running?",
                     data={
                         "action": action,
-                        "hint": "Open Inkscape GUI first, then set INKSCAPE_GUI_WATCH=1",
+                        "session_id": session_id or "desktop",
+                        "hint": "Keep the target window open and use its exact session_id from list_documents",
                     },
                     execution_time_ms=0,
                     error=str(exc),
@@ -374,9 +283,10 @@ async def inkscape_system(
                 operation="version",
                 message="Retrieved version information",
                 data={
-                    "server": "Inkscape MCP Server v2.1.0",
+                    "server": f"Inkscape MCP Server v{__version__}",
+                    "version": __version__,
                     "protocol": "FastMCP 3.2+",
-                    "architecture": "Portmanteau Tools + Agent Lab Phase 1",
+                    "architecture": "Portmanteau tools with batch operations and managed document sessions",
                     "inkscape_required": "1.0+ (1.2+ recommended for Actions API)",
                 },
                 execution_time_ms=(time.time() - start_time) * 1000,
@@ -405,6 +315,8 @@ async def inkscape_system(
             ).model_dump()
 
         elif operation == "list_extensions":
+            from ..utils.live_extension import extension_directory
+
             # Scan Inkscape extensions directories for .inx files
             extensions: list[dict[str, str]] = []
             ext_dirs: list[str] = []
@@ -415,29 +327,29 @@ async def inkscape_system(
                 ext_dirs.append(
                     str(Path.home() / "AppData" / "Roaming" / "inkscape" / "extensions")
                 )
+            ext_dirs.append(str(extension_directory().parent))
+            ext_dirs = list(dict.fromkeys(ext_dirs))
             for d in ext_dirs:
                 dp = Path(d)
                 if dp.is_dir():
-                    for inx in sorted(dp.glob("*.inx")):
+                    for inx in sorted(dp.rglob("*.inx")):
                         try:
-                            txt = inx.read_text(encoding="utf-8", errors="replace")
-                            name = ""
-                            for line in txt.split("\n"):
-                                ll = line.strip()
-                                if ll.startswith("<_name>"):
-                                    name = ll.replace("<_name>", "").replace("</_name>", "").strip()
-                                elif ll.startswith("<name>"):
-                                    name = ll.replace("<name>", "").replace("</name>", "").strip()
-                                elif ll.startswith("<_effect"):
-                                    name = inx.stem
-                                elif ll.startswith("<id>"):
-                                    ext_id = ll.replace("<id>", "").replace("</id>", "").strip()
+                            root = ET.parse(inx).getroot()
+                            fields = {
+                                child.tag.rsplit("}", 1)[-1]: (child.text or "").strip()
+                                for child in root
+                            }
+                            name = fields.get("name") or fields.get("_name")
                             if name:
                                 extensions.append(
-                                    {"id": ext_id or inx.stem, "name": name, "path": str(inx)}
+                                    {
+                                        "id": fields.get("id") or inx.stem,
+                                        "name": name,
+                                        "path": str(inx),
+                                    }
                                 )
-                        except Exception:
-                            pass
+                        except (OSError, ET.ParseError) as exc:
+                            logger.debug("Skipping unreadable extension %s: %s", inx, exc)
             return SystemResult(
                 success=True,
                 operation="list_extensions",

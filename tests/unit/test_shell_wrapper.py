@@ -333,3 +333,45 @@ async def test_failed_pool_restart_does_not_lose_capacity(spawn):
         assert shell.is_running
     await pool.close()
     assert replacement.waited
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "action:object_trace: selection empty!",
+        "action:transform_translate: expected argument",
+        "action:transform_scale: parsing arguments failed",
+    ],
+)
+async def test_action_argument_failures_invalidate_shell(spawn, diagnostic):
+    process = FakeProcess(respond=False)
+    spawn.return_value = process
+    shell = ShellModeWrapper(sys.executable)
+    await shell.start()
+    task = asyncio.create_task(shell.run_actions("object-trace"))
+    await asyncio.sleep(0)
+    process.stdout.feed_data(f"{diagnostic}\n> ".encode())
+    try:
+        with pytest.raises(ShellModeError, match="action error"):
+            await task
+        assert process.waited and not shell.is_running
+    finally:
+        await shell.close()
+
+
+@pytest.mark.parametrize("exit_code", [0, -11])
+async def test_exit_after_prompt_is_not_reported_as_success(spawn, exit_code):
+    process = FakeProcess(respond=False)
+    spawn.return_value = process
+    shell = ShellModeWrapper(sys.executable)
+    await shell.start()
+    task = asyncio.create_task(shell.run_actions("query-all"))
+    await asyncio.sleep(0)
+    process.stdout.feed_data(b"result\n> ")
+    process.finish(exit_code)
+    try:
+        with pytest.raises(ShellModeError, match="exited"):
+            await task
+        assert process.waited and not shell.is_running
+    finally:
+        await shell.close()

@@ -86,7 +86,7 @@ class InkscapeMCPServer:
         Args:
             config_path: Optional path to configuration file
         """
-        self.config = load_config(config_path) if config_path else InkscapeConfig()
+        self.config = load_config(config_path) if config_path else InkscapeConfig.load_default()
         self.mcp = FastMCP("Inkscape MCP Server")
         self.app = self.mcp  # Add app attribute for ASGI compatibility
         self.tools = {}  # Store tool instances for later reference
@@ -116,7 +116,10 @@ class InkscapeMCPServer:
 
             # Initialize Inkscape detector
             self.inkscape_detector = InkscapeDetector()
-            inkscape_path = self.inkscape_detector.detect_inkscape_installation()
+            inkscape_path = (
+                self.config.inkscape_executable
+                or self.inkscape_detector.detect_inkscape_installation()
+            )
 
             if inkscape_path:
                 logger.info(f"Found Inkscape at: {inkscape_path}")
@@ -589,30 +592,63 @@ class InkscapeMCPServer:
             ),
         )
         async def inkscape_system(
-            operation: InkscapeSystemOperation, action: str = ""
+            operation: InkscapeSystemOperation,
+            action: str = "",
+            svg_content: str = "",
+            text: str = "Prova MCP OK",
+            search: str = "",
+            limit: int = 100,
+            offset: int = 0,
+            input_path: str = "",
+            output_path: str = "",
+            session_id: str = "desktop",
         ) -> dict[str, Any]:
-            """INKSCAPE_SYSTEM - Server/Inkscape status, help, diagnostics, version, extensions.
+            """INKSCAPE_SYSTEM - Diagnostics, native actions, and addressed desktop documents.
 
             PORTMANTEAU RATIONALE: Operational and introspection calls stay in one discoverable tool.
 
             Operations: status, execution_mode, hands_in_command, help, diagnostics, version,
-            config, list_extensions, execute_extension, self_terminate.
+            config, list_extensions, execute_extension, self_terminate,
+            active_document, insert_svg, draw_test, list_actions,
+            list_documents, open_document, new_document, install_live_extension,
+            save_document, save_copy, close_document.
 
             Args:
                 operation: System subcommand (Literal). Extension execution may require extra
                     parameters not exposed on this MCP wrapper - prefer list_extensions first.
                 action: Semicolon-separated Inkscape actions for hands_in_command. Requires
                     a running Inkscape GUI and access to its desktop session.
+                svg_content: Complete SVG XML to insert into session_id through the native effect.
+                    Requires Linux, gdbus, and install_live_extension; restart existing windows once.
+                text: Editable demo label for draw_test. Inserts a blue rectangle and text,
+                    preserves existing objects, and verifies live content without using the clipboard.
+                search: Case-insensitive name/description substring for list_actions.
+                limit: Maximum CLI actions per page for list_actions (1-500, default 100).
+                offset: Starting index in filtered list_actions results (default 0).
+                input_path: Existing SVG to open in a separate managed session.
+                output_path: New SVG path for new_document (refuses overwrite), or snapshot
+                    destination for save_copy (preserves the GUI filename).
+                session_id: Managed ID returned by list_documents/open_document/new_document,
+                    or desktop for an existing single-window instance. Save/close require a managed ID.
 
             Returns:
                 Dict with success, message, data, execution_time_ms, error.
 
             Errors:
-                Inkscape missing, extension disabled - message describes recovery (install PATH).
+                Missing Inkscape or native extension, unavailable/ambiguous session, or unverified
+                edit/save. Inspect the target before retrying an uncertain mutation.
             """
             return await inkscape_system_tool(
                 operation=operation,
                 action=action,
+                svg_content=svg_content,
+                text=text,
+                search=search,
+                limit=limit,
+                offset=offset,
+                input_path=input_path,
+                output_path=output_path,
+                session_id=session_id,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )
@@ -700,14 +736,14 @@ async def main_async():
 
     parser = argparse.ArgumentParser(description="Inkscape MCP Server")
     parser.add_argument("--config", type=str, help="Path to config file", default=None)
-    parser.add_argument("--mode", choices=["stdio", "http", "dual"], default="dual")
+    parser.add_argument("--mode", choices=["stdio", "http", "dual"], default=None)
     parser.add_argument(
         "--port",
         type=int,
-        default=11027,
+        default=None,
         help="HTTP port when dual/http transport is used (fleet webapp backend; Vite proxies /mcp and /api here)",
     )
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default=None)
     parser.add_argument("--log-level", default="INFO")
 
     args = parser.parse_args()
@@ -720,24 +756,18 @@ async def main_async():
 
     configure_json_logging_if_enabled()
 
-    # Bridge this CLI to transport env.
-    # If MCP_TRANSPORT is already set externally (e.g. Claude Desktop config env),
-    # honour it - only apply the argparser value when --mode was explicitly passed.
-    explicit_mode = "--mode" in sys.argv
-    if explicit_mode:
-        os.environ["MCP_PORT"] = str(args.port)
-        if args.mode == "stdio":
-            os.environ["MCP_TRANSPORT"] = "stdio"
-        elif args.mode == "http":
-            os.environ["MCP_TRANSPORT"] = "http"
-        else:
-            os.environ["MCP_TRANSPORT"] = "http"
+    # Only explicit CLI values override the environment. In particular, leaving
+    # --mode out must not turn a stdio MCP client into an HTTP listener.
+    if args.mode is not None:
+        os.environ["MCP_TRANSPORT"] = "stdio" if args.mode == "stdio" else "http"
     else:
-        # No --mode arg - respect whatever MCP_TRANSPORT is already set to.
-        # Fall back to http only if nothing is set at all.
-        if not os.environ.get("MCP_TRANSPORT"):
-            os.environ["MCP_TRANSPORT"] = "stdio"
-        os.environ.setdefault("MCP_PORT", str(args.port))
+        os.environ.setdefault("MCP_TRANSPORT", "stdio")
+    if args.port is not None:
+        os.environ["MCP_PORT"] = str(args.port)
+    else:
+        os.environ.setdefault("MCP_PORT", "11027")
+    if args.host is not None:
+        os.environ["MCP_HOST"] = args.host
 
     try:
         server = InkscapeMCPServer(config_path=Path(args.config) if args.config else None)
@@ -752,8 +782,8 @@ async def main_async():
                 stdio=args.mode == "stdio",
                 http=args.mode in ("http", "dual"),
                 sse=False,
-                host=None,
-                port=args.port if args.mode != "stdio" else None,
+                host=args.host,
+                port=args.port,
                 path=None,
                 debug=args.log_level.upper() == "DEBUG",
             )

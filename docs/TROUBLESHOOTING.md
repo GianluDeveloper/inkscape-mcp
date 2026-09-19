@@ -1,352 +1,174 @@
-# Troubleshooting Guide
+# Troubleshooting
 
-## Installation Issues
+Start with `inkscape --version`, `uv run python --version`, and the MCP call
+`inkscape_system` / `{"operation":"status"}`. A running server and an available
+CLI do not by themselves prove the desktop session is reachable.
 
-### Inkscape Not Found
+## Python dependencies fail to build
 
-**Error:** `Inkscape executable not found`
-
-**Solutions:**
-1. Install Inkscape from the official website
-2. Add Inkscape to your system PATH
-3. Specify the full path in `config.yaml`:
-   ```yaml
-   inkscape_executable: "/path/to/inkscape.exe"
-   ```
-
-### Python Version Issues
-
-**Error:** `Python version not supported`
-
-**Solutions:**
-- Use Python 3.10 or higher
-- Check version with `python --version`
-- Create virtual environment with correct Python version
-
-### Dependency Installation Failed
-
-**Error:** `pip install` fails
-
-**Solutions:**
-- Upgrade pip: `python -m pip install --upgrade pip`
-- Use virtual environment
-- Check network connectivity
-- Install build dependencies (Linux/macOS)
-
-## Runtime Issues
-
-### Native crash in `active_window_end_helper` / `sp_repr_save_stream`
-
-Inkscape's internal `active-window-start` and `active-window-end` actions manage
-the live GUI command bridge. Calling them directly or out of sequence can crash
-the native document saver; [upstream issue #4765](https://gitlab.com/inkscape/inkscape/-/issues/4765)
-contains this stack trace. This is a matching failure path, not proof of the
-trigger for every crash with these frames.
-
-The MCP server rejects these internal actions before launching Inkscape, including
-inside semicolon-separated commands and shell sessions. Use ordinary editing
-actions in `hands_in_command`; Inkscape manages the bridge itself. Live GUI
-commands are serialized within each CLI wrapper. Independent MCP server processes
-or other clients can still compete for the same GUI, so use file-based operations
-for concurrent automation.
-
-Batch commands use separate application IDs. Managed CLI exports write a temporary
-file beside the destination and replace the destination only after successful
-execution and output checks (SVG XML, PNG integrity, PDF header/trailer).
-Failures, timeouts and cancellation preserve the existing destination. Unknown
-actions and missing object IDs are errors even when Inkscape exits with status 0;
-GTK/font warnings remain in logs rather than contaminating numeric query results.
-
-Restart the MCP connection after updating the server. These protections cannot
-guarantee that every native Inkscape bug is avoided. When reporting a remaining
-crash, include the action sequence and a minimal SVG that reproduces it.
-
-To run the runtime regressions with a real Inkscape installation:
+The project requires Python **3.12+**. On Ubuntu 26.04, errors about `cairo`,
+`girepository-2.0`, or PyGObject usually indicate missing native development
+packages. Install the dependencies in [Installation](../INSTALL.md#ubuntu-2604),
+then rerun:
 
 ```bash
-uv run pytest tests/integration/test_inkscape_runtime.py -o addopts='' -q
+uv sync --python 3.12
 ```
 
-The tests skip if Inkscape is unavailable. Run them in a normal desktop environment
-when testing raster imports: restrictive sandboxes may block the Glycin image
-loader's D-Bus communication on Linux.
+Confirm native dependency discovery with:
 
-### Operation Timeout
-
-**Error:** `Operation timed out`
-
-**Solutions:**
-- Increase timeout in config:
-  ```yaml
-  process_timeout: 60
-  ```
-- Check system resources (CPU/memory)
-- Simplify the operation or reduce file size
-
-### File Not Found
-
-**Error:** `Input file not found`
-
-**Solutions:**
-- Use absolute paths
-- Check file permissions
-- Ensure file exists before operation
-- Verify working directory
-
-### Invalid SVG Format
-
-**Error:** `Invalid or corrupted SVG file`
-
-**Solutions:**
-- Validate SVG with `inkscape_file(operation="validate")`
-- Check SVG namespace declarations
-- Repair with text editor if necessary
-- Use well-formed SVG sources
-
-## AI Generation Issues
-
-### Generation Failed
-
-**Error:** `AI model generation failed`
-
-**Solutions:**
-- Check network connectivity for AI services
-- Verify API keys if required
-- Try different model or quality settings
-- Reduce description complexity
-
-### Quality Issues
-
-**Problem:** Generated SVG quality is poor
-
-**Solutions:**
-- Use higher quality settings
-- Provide more detailed descriptions
-- Use appropriate style presets
-- Apply post-processing operations
-
-### Style Not Applied
-
-**Problem:** Style preset not working as expected
-
-**Solutions:**
-- Verify preset name spelling
-- Try different style presets
-- Provide style hints in description
-- Check generation logs
-
-## Extension Issues
-
-### Extension Not Found
-
-**Error:** `Extension not available`
-
-**Solutions:**
-- Install the extension in Inkscape
-- Check extension directory permissions
-- Restart the MCP server
-- Verify extension ID
-
-### Extension Execution Failed
-
-**Error:** `Extension execution failed`
-
-**Solutions:**
-- Check extension parameters
-- Verify input file compatibility
-- Review extension documentation
-- Try with simpler parameters
-
-## Platform-Specific Issues
-
-### Windows Issues
-
-**Common Problems:**
-- PATH environment variable not set
-- Permission issues with temp directories
-- Inkscape GUI/CLI profile lock conflict (see below)
-
-**Solutions:**
-- Add Inkscape to system PATH
-- Run as administrator if needed
-
----
-
-### Inkscape GUI and CLI conflict on Windows (profile lock)
-
-**Symptom:** CLI tool calls time out or hang when Inkscape GUI is open. `inkscape_system(status)` shows `inkscape.available: false` even though Inkscape is installed and running.
-
-**Cause:** On Windows, Inkscape locks `preferences.xml` in the user profile directory (`%APPDATA%\inkscape`) when the GUI is open. Any CLI invocation (`inkscape --export-filename=...`) attempts to read and write the same profile on startup and blocks waiting for the lock, causing the MCP tool call to time out. This is an Inkscape architectural limitation, not a bug in inkscape-mcp.
-
-**Fix — isolated CLI profile (recommended):**
-
-Set `INKSCAPE_PROFILE_DIR` to a separate directory in the inkscape-mcp server environment. The CLI gets its own profile that the GUI never touches. In your Claude Desktop config (`claude_desktop_config.json`), add to the `inkscape-mcp` env block:
-
-```json
-"INKSCAPE_PROFILE_DIR": "D:/Dev/repos/inkscape-mcp/inkscape-profile"
+```bash
+pkg-config --modversion cairo girepository-2.0
 ```
 
-The directory is created automatically on first CLI run. GUI and CLI then coexist without conflicts.
+Use the correct packages for your distribution; older GObject Introspection
+libraries may not satisfy the selected Python dependency versions.
 
-**Alternative — close the GUI before CLI ops:**
+## Inkscape is unavailable
 
-Not practical for interactive use, but works if you only need CLI batch processing and have no need for the GUI simultaneously.
+Verify the executable directly. Set an absolute `INKSCAPE_PATH` or
+`inkscape_executable` in the selected YAML file. The configured executable is
+retained during initialization. On Windows, use the classic desktop installer;
+the Microsoft Store executable can fail with **Access Denied** for CLI calls.
 
-**Not recommended:** Running the GUI in a VM (VirtualBox, Windows Sandbox) to isolate it. This works in principle but is wildly overcomplicated for a profile directory problem.
+A desktop-launched MCP client can have a different `PATH` from a terminal. Use
+absolute paths to both uv and Inkscape in its server configuration.
 
----
+## The client hangs, starts HTTP unexpectedly, or shows old parameters
 
-### macOS Issues
+Configure `--mode stdio` explicitly for a stdio client. A server manually started
+in a terminal waits for protocol messages; it does not show an interactive
+prompt. HTTP mode is selected with `--mode http` or `MCP_TRANSPORT=http`.
 
-**Common Problems:**
-- Homebrew installation conflicts
-- Permission issues with system directories
+Reconnect the MCP client after updating source code. Tool schemas are obtained
+when the connection starts; an existing process can continue serving old
+operations. Confirm `active_document`, `insert_svg`, and `draw_test` appear in
+`inkscape_system`'s operation enum.
 
-**Solutions:**
-- Install via Homebrew: `brew install inkscape`
-- Check /usr/local permissions
-- Use absolute paths
+## Live drawing cannot reach the window
 
-### Linux Issues
+The bridge requires Linux, Inkscape 1.3+, `gdbus`, and access to the same user
+desktop session. Preserve `DISPLAY` or `WAYLAND_DISPLAY`,
+`DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR`, and applicable `XAUTHORITY`. A
+service, container, or SSH shell often has different access. Start the client
+from the graphical session to compare behavior.
 
-**Common Problems:**
-- Missing system dependencies
-- Display server conflicts
-- Library version conflicts
+Install the native effect with `inkscape_system` /
+`{"operation":"install_live_extension"}`. Check `install_dir` and
+`needs_restart`, then restart Inkscape windows opened before installation. The
+effect must be installed into the profile used by the target application.
+New managed instances load it when they start. No clipboard helper is required.
 
-**Solutions:**
-- Install required packages: `sudo apt install inkscape`
-- Use `--batch-process` flag
-- Check library dependencies
+`INKSCAPE_GUI_WATCH=1` is a mode hint, not an access grant. Avoid launching with
+`sudo`, which changes the user/session context. Close modal dialogs and use the
+exact `session_id` returned by `list_documents`, `open_document`, or `new_document`.
 
-## Performance Issues
+If the ordinary `desktop` instance has multiple windows, it is intentionally
+ambiguous. Use managed sessions to address separate drawings. Each managed
+application instance should have one document window; open additional documents
+through `open_document`/`new_document` to give them their own target IDs.
 
-### Slow Operations
+If `draw_test` reports an unverified insertion, inspect the target before
+repeating it. A dispatched effect may already have changed the document.
+`active_document` reads live SVG to help inspect the result. A verified insertion
+can be undone through **Edit → Undo**. If only the final view adjustment failed,
+`view_warning` is populated but the inserted objects can already be present.
 
-**Causes:**
-- Large file sizes
-- Complex operations
-- System resource constraints
-- Network latency (for AI operations)
+## Saving or closing managed documents
 
-**Solutions:**
-- Reduce file sizes
-- Use simpler operations
-- Increase system resources
-- Cache frequent operations
+`save_document` writes to the managed session's original SVG path and verifies
+it against the live drawing. A manual Save As or open save dialog can prevent
+that verification. `save_copy` writes a verified snapshot to `output_path` and
+does not rename the GUI document. It works for `desktop` as well.
 
-### Memory Issues
+`close_document` requires a managed session and invokes the native close action.
+An unsaved-changes dialog keeps the window open. The tool reports this rather
+than choosing Discard. Save or resolve the dialog, then retry the close.
 
-**Error:** `Out of memory`
+Unknown or closed session IDs never fall back to another window. Refresh
+`list_documents` and use its actual IDs. The registry is in
+`~/.cache/inkscape-mcp/document-sessions.json` by default; the live session bus,
+not the registry alone, determines whether a session is open.
 
-**Solutions:**
-- Reduce concurrent operations in config
-- Process files in smaller batches
-- Close other applications
-- Add more RAM or use smaller files
+## Native crash in the active-window bridge
 
-### High CPU Usage
+The internal Inkscape actions `active-window-start` and `active-window-end` must
+not be called explicitly. The server rejects them in CLI and shell action chains
+because Inkscape owns their lifecycle. Use `hands_in_command` with normal editing
+actions or the verified live insertion operations.
 
-**Causes:**
-- Multiple concurrent operations
-- Complex AI generation
-- Large file processing
+Desktop calls from one wrapper are serialized. Separate MCP processes or other
+clients can still compete for the same GUI. Run a single desktop controller and
+use file-based batch operations for independent parallel jobs. Preserve a minimal
+SVG and action sequence when reporting a remaining native crash.
 
-**Solutions:**
-- Reduce `max_concurrent_processes`
-- Use lower quality settings
-- Process sequentially instead of parallel
+## A command exits successfully but the operation fails
 
-## Configuration Issues
+Inkscape can print an unknown-action, missing-object, or export failure diagnostic
+while returning exit code zero. The wrapper treats these diagnostics as failures.
+It also checks generated artifacts before publishing managed exports. This avoids
+reporting a successful edit when no valid output was produced.
 
-### Config Not Loaded
+GTK/font warnings are kept out of numeric query results. An existing destination
+is preserved when managed export execution, validation, timeout, or cancellation
+fails. Review the returned `message`/`error` and stderr instead of relying only on
+an exit code.
 
-**Problem:** Configuration changes not applied
+## Invalid SVG or inaccessible paths
 
-**Solutions:**
-- Check YAML syntax
-- Use absolute paths
-- Restart the server
-- Verify file permissions
+Use a complete SVG document with the namespace
+`xmlns="http://www.w3.org/2000/svg"`. Live insertion rejects malformed XML, DTD/entity
+declarations, empty drawings, and oversized content before interacting with the
+desktop. For file construction, ensure the output is an `.svg` path.
 
-### Invalid Configuration
+Use absolute paths. Check permissions and `allowed_directories`. File editing
+operations require explicit source and destination paths; they do not implicitly
+save the active window. Size limits can be configured in YAML.
 
-**Error:** `Configuration validation failed`
+## Timeouts and slow exports
 
-**Solutions:**
-- Check YAML indentation
-- Verify parameter types
-- Review documentation for valid values
-- Use default configuration as template
+Set `process_timeout` in YAML, within its 5–300 second range, and restart the
+server. Reduce file complexity or `max_concurrent_processes` for heavy jobs.
+Live extension and snapshot steps also have their own bounded waits; increasing
+the general CLI timeout does not solve missing desktop services.
 
-## Network Issues
+For native runtime regressions:
 
-### Connection Refused
-
-**Error:** `Connection to MCP server failed`
-
-**Solutions:**
-- Check if server is running
-- Verify port configuration
-- Check firewall settings
-- Use correct server URL
-
-### Timeout Issues
-
-**Problem:** Network operations timeout
-
-**Solutions:**
-- Increase timeout values
-- Check network connectivity
-- Reduce request complexity
-- Use local operations when possible
-
-## Logging and Debugging
-
-### Enable Debug Logging
-
-Add to configuration:
-```yaml
-logging:
-  level: DEBUG
-  file: inkscape-mcp.log
+```bash
+uv run pytest tests/integration/test_inkscape_runtime.py --no-cov -q
 ```
 
-### Check Logs
+Raster imports can depend on the system image loader and its D-Bus access.
+Compare a normal desktop session if a restrictive environment blocks that loader.
 
-Common log locations:
-- Console output (when running directly)
-- System log files
-- Application-specific log directory
+## Sampling and local models
 
-### Common Debug Steps
+`generate_svg` and the other sampling tools need client support for MCP
+`sampling.tools`. FastMCP injects the context; do not send `ctx` in arguments.
+A client without this capability can still use `construct_svg` with complete XML,
+all ordinary file tools, and live insertion.
 
-1. Enable verbose logging
-2. Check system resources
-3. Verify file permissions
-4. Test with minimal example
-5. Check network connectivity
-6. Review error messages carefully
+The dashboard's Ollama/cloud generation path is separate. Check its provider
+settings and endpoint, and use `list_local_models` to inspect reachable model
+services. An empty model list does not imply that Inkscape is unavailable.
 
-## Getting Help
+## HTTP and dashboard connection errors
 
-### Documentation Resources
-- [README.md](README.md) - Basic usage
-- [USAGE.md](USAGE.md) - Detailed usage examples
-- [API.md](API.md) - Complete API reference
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Technical details
+The default standalone HTTP port is `11027`. The dashboard expects its backend
+on `11028` and Vite runs on `11029`. Start the backend explicitly:
 
-### Community Support
-- GitHub Issues for bug reports
-- GitHub Discussions for questions
-- Documentation wiki for tutorials
+```bash
+uv run inkscape-mcp --mode http --host 127.0.0.1 --port 11028
+```
 
-### Diagnostic Information
+Use `/mcp` for an MCP client and `/api/health` for the REST health helper. The
+`dual` CLI value is an HTTP alias, not simultaneous stdio and HTTP. Check for an
+already-running listener if the port is occupied.
 
-When reporting issues, include:
-- Operating system and version
-- Python version
-- Inkscape version
-- Full error message and stack trace
-- Configuration file (without sensitive data)
-- Steps to reproduce the issue
+## Report a reproducible issue
+
+Use [GitHub Issues](https://github.com/GianluDeveloper/inkscape-mcp/issues). Include
+OS/Python/Inkscape versions, the exact tool name and arguments, its structured
+response, and a minimal public SVG. For live failures, include the session type,
+extension install result, session ID, and number of open Inkscape windows. Remove credentials and
+private document content from attachments.

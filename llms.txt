@@ -1,56 +1,26 @@
 # Inkscape MCP
 
-> **Inkscape MCP** is a FastMCP **3.4+** server that drives the **Inkscape CLI** for SVG and vector workflows. Agents use portmanteau tools (`inkscape_file`, `inkscape_vector`, `inkscape_analysis`, `inkscape_system`) plus optional **sampling/agentic** tools when the host supports `ctx.sample()`. Transports: **stdio** and **HTTP** (`MCP_PORT`, default **11028**); optional **REST** `/api/*` and **Vite** dashboard (**11029**) when you run the web stack.
+> FastMCP server for SVG construction, Inkscape CLI automation, and native Linux
+> desktop editing. Entry point: `uv run inkscape-mcp`. Python 3.12+.
 
-**Full detail:** see [`llms-full.txt`](llms-full.txt) for every tool operation, environment variables, run commands, troubleshooting, and MCP config snippets.
+- [README](README.md): project scope, verified environment, quick start, credits.
+- [Installation](INSTALL.md): Ubuntu 26.04 native dependencies, source install, MCP client setup.
+- [Tools](docs/TOOLS.md): every registered MCP tool and operation, parameters, current limits.
+- [Usage](docs/USAGE.md): construction, export, live insertion, multiple documents, save/close.
+- [Configuration](docs/CONFIGURATION.md): YAML, environment, stdio/HTTP, desktop state.
+- [Troubleshooting](docs/TROUBLESHOOTING.md): dependency, session, extension, export failures.
+- [Development](docs/DEVELOPMENT.md): tests and source layout.
+- [Sampling](docs/AI_SAMPLING.md): optional client sampling versus dashboard providers.
+- [Upstream integration](docs/UPSTREAM_INTEGRATION.md): lineage and native bridge design.
+- [Extended agent guide](llms-full.txt): operational rules and tool selection.
 
-## Quick links
+Default transport: stdio. Standalone HTTP default: 127.0.0.1:11027, MCP path /mcp.
+Dashboard backend: explicitly use port 11028; Bun/Vite frontend: 11029.
+Native desktop insertion uses the bundled inkex effect and explicit session IDs,
+not keyboard focus or clipboard paste. Install with `install_live_extension`,
+then restart any already-open target windows once.
 
-- [README.md](README.md) — overview and doc table
-- [docs/INSTALL.md](docs/INSTALL.md) — clone → `uv sync` → run
-- [docs/IDE_MCP.md](docs/IDE_MCP.md) — Cursor, Windsurf, Claude Desktop patterns
-- [docs/INKSCAPE.md](docs/INKSCAPE.md) — CLI and PATH
-- [docs/USAGE.md](docs/USAGE.md) — how to call tools
-- [docs/AI_SAMPLING.md](docs/AI_SAMPLING.md) — SEP-1577 / agentic tools
-- [docs/MCPB.md](docs/MCPB.md) — Claude Desktop `.mcpb` bundle
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — modules and transports
-- [glama.json](glama.json) — Glama / discovery metadata
-- [CHANGELOG.md](CHANGELOG.md)
-
-## Tools (summary)
-
-| Tool | Role |
-|------|------|
-| `inkscape_file` | load, save, convert, info, validate, list_formats |
-| `inkscape_vector` | trace, boolean, paths, QR/barcode, preview, mesh, units, … |
-| `inkscape_analysis` | quality, statistics, validate, objects, dimensions, structure |
-| `inkscape_system` | status, help, diagnostics, version, config, extensions |
-| `list_local_models` | Ollama / LM Studio discovery |
-| `generate_heraldry` | Heraldic SVG (e.g. trumponia) |
-| `generate_svg`, `agentic_inkscape_workflow`, `intelligent_vector_processing`, `conversational_inkscape_assistant` | **Sampling hosts only** — see `docs/AI_SAMPLING.md` |
-
-Full per-operation lists: **`llms-full.txt` § Tools**.
-
-## Prompts and resources (MCP)
-
-Registered URIs (FastMCP 3.1):
-
-- **Prompts:** `prompt://inkscape/svg-file-workflow`, `vector-editing-workflow`, `analysis-workflow`, `sampling-agentic-workflow`, `heraldry-workflow`
-- **Resources:** `resource://inkscape/capabilities`, `resource://inkscape/skills`
-
-## Ports (fleet web stack)
-
-| Service | Port | Notes |
-|---------|------|--------|
-| Vite dev UI (`web_sota`) | **11029** | Proxies `/api` and `/mcp` to backend |
-| MCP HTTP + REST bridge | **11028** | `MCP_PORT`; MCP path default `/mcp` |
-
-## Packaging
-
-- **uv** + `pyproject.toml` — [docs/INSTALL.md](docs/INSTALL.md)
-- **justfile** — `just test`, `just mcpb-pack`, etc.
-- **MCPB** — `just mcpb-pack` → `dist/inkscape-mcp-v*.mcpb` (see [docs/MCPB.md](docs/MCPB.md))
-
-## Maintainer / upstream
-
-Repository: `https://github.com/sandraschi/inkscape-mcp` — MIT.
+Canonical repository: https://github.com/GianluDeveloper/inkscape-mcp
+Base: https://github.com/sandraschi/inkscape-mcp
+Native bridge upstream: https://github.com/aravindev/inkscape_mcp
+License and attribution: [LICENSE](LICENSE), [NOTICE.md](NOTICE.md).

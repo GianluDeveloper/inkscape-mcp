@@ -104,6 +104,10 @@ if (-not (Test-Path $SrcPkg)) { throw "Copy source missing: $SrcPkg" }
 New-Item -ItemType Directory -Force -Path $StageRoot | Out-Null
 Copy-Item -Recurse -Force $SrcPkg $StagePkg
 Write-Host "  copied $SrcPkg -> $StagePkg"
+# Keep bundle dependencies, lockfile and attribution tied to the canonical source.
+foreach ($MetadataFile in @('pyproject.toml', 'uv.lock', 'LICENSE', 'NOTICE.md')) {
+    Copy-Item -Force (Join-Path $RepoRoot $MetadataFile) (Join-Path $McpbDir $MetadataFile)
+}
 
 Step 2 'Strip pollution from the fresh stage'
 Get-ChildItem -Recurse -Path $StageRoot -Include '__pycache__' -Directory -ErrorAction SilentlyContinue |

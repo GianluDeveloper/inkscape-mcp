@@ -52,10 +52,6 @@ export function LlmOnboarding({ mode }: Props) {
     })();
   }, []);
 
-  useEffect(() => {
-    if (mode === "full") setExpanded(true);
-  }, [mode]);
-
   if (loading || error || !state) return null;
 
   const detectedLocals = providers.filter(

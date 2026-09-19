@@ -1,35 +1,44 @@
-# AI and sampling (agentic tools)
+# Sampling and optional model services
 
-## Portmanteau tools (always)
+Ordinary SVG construction, file edits, export, inspection, and live drawing use
+normal MCP tool calls. They do not need a separate model service or client sampling.
 
-These work over normal MCP tool calls — no sampling required:
+## Client sampling
 
-- `inkscape_file`, `inkscape_vector`, `inkscape_analysis`, `inkscape_system`
-- `list_local_models` (discovers local endpoints when available)
+Four tools in `agentic.py` call FastMCP's `Context.sample()`:
 
-## Agentic / SEP-1577 sampling
+- `generate_svg`: requests SVG XML and saves the result beneath `generated_svgs/`.
+- `agentic_inkscape_workflow`: returns an ordered workflow plan.
+- `intelligent_vector_processing`: returns a processing plan for documents.
+- `conversational_inkscape_assistant`: returns vector graphics guidance.
 
-Optional tools in `agentic.py` use **FastMCP 3.1** `ctx.sample()` so the **host client’s LLM** can plan multi-step SVG workflows. They only work when:
+The MCP client must support sampling **and** `sampling.tools`, since the model
+can consult capability probes. FastMCP injects `Context`; never provide `ctx` as a
+JSON argument. Registration of these tools does not prove the client implements
+the capability.
 
-1. The MCP client implements **sampling** (e.g. some Cursor/Cline flows), and  
-2. The server successfully registers those tools at startup.
+Planning helpers do not automatically execute every edit described in their
+responses. Verify proposed operations against `tools/list`, then call the editing
+tools. Validate generated XML before using it in downstream rendering or sharing.
 
-If sampling is unavailable, rely on the portmanteau tools step by step.
+If sampling is unavailable, construct SVG directly:
 
-## Server-side LLM defaults (REST / Ollama helpers)
+```json
+{
+  "operation": "construct_svg",
+  "output_path": "/absolute/path/to/simple.svg",
+  "svg_content": "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\"><circle cx=\"50\" cy=\"50\" r=\"30\" fill=\"blue\"/></svg>"
+}
+```
 
-Code under `app.py` documents defaults such as:
+Send that request to `inkscape_vector`.
 
-- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-- `OLLAMA_MODEL` (default `qwen2.5-coder:latest`)
+## Dashboard providers
 
-These are used by optional HTTP/REST bridge paths, not a substitute for MCP client sampling. Adjust env vars to match your local Ollama or compatible server.
+The optional HTTP dashboard has a separate generation path using Ollama and
+configured cloud fallbacks. `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and provider keys
+apply to that path; they do not add sampling capability to an MCP client.
 
-## Practical workflow
-
-1. Confirm **Inkscape CLI** — [INKSCAPE.md](INKSCAPE.md).  
-2. Use direct tools for deterministic edits (export, trace, validate).  
-3. Enable agentic tools only when your IDE supports sampling and you want orchestrated plans.  
-4. For local LLM listing, call `list_local_models` if Ollama/LM Studio is running.
-
-See source: `src/inkscape_mcp/agentic.py`, `src/inkscape_mcp/app.py`.
+`list_local_models` discovers reachable local model endpoints. `llm_ops` can
+inspect or change the local engine's loaded models. These services are optional.
+See [Configuration](CONFIGURATION.md) and [Tools](TOOLS.md).

@@ -1,18 +1,20 @@
-# Documentation index
+# Documentation
 
-| Guide | Topic |
-|-------|--------|
-| [INSTALL.md](INSTALL.md) | Clone, `uv sync`, PyPI / `uvx` |
-| [INKSCAPE.md](INKSCAPE.md) | Inkscape install and CLI |
-| [IDE_MCP.md](IDE_MCP.md) | Cursor, VS Code, Windsurf, Glama |
-| [MCPB.md](MCPB.md) | Claude Desktop `.mcpb` |
-| [USAGE.md](USAGE.md) | Using MCP tools from agents |
-| [AI_SAMPLING.md](AI_SAMPLING.md) | Agentic tools and sampling |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Code layout and transports |
-| [API.md](API.md) | Tool parameters |
-| [FEATURES.md](FEATURES.md) | Capability overview |
-| [COMPETITIVE_ANALYSIS.md](COMPETITIVE_ANALYSIS.md) | Ecosystem comparison |
-| [ROADMAP.md](ROADMAP.md) | Agent Lab phased plan |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures |
+Start with [the project overview](../README.md) and
+[installation guide](../INSTALL.md).
 
-Repository entry point: [../README.md](../README.md).
+| Guide | Contents |
+| --- | --- |
+| [Installation](../INSTALL.md) | Native dependencies, source setup, client connection, desktop access |
+| [Configuration](CONFIGURATION.md) | Transport, ports, YAML, environment variables |
+| [Tool reference](TOOLS.md) | Registered MCP tools, parameters, operation limits |
+| [Usage](USAGE.md) | Construction, export, inspection, live drawing procedures |
+| [Troubleshooting](TROUBLESHOOTING.md) | Installation, protocol, desktop, and export failures |
+| [Development](DEVELOPMENT.md) | Tests, source layout, schema changes, packaging |
+| [Contributing](../CONTRIBUTING.md) | Reproductions, PR expectations, licensing |
+| [Upstream integration](UPSTREAM_INTEGRATION.md) | Base project, adapted/inspired work, live integration decisions |
+
+Additional maintainer references: [Architecture](ARCHITECTURE.md),
+[Sampling](AI_SAMPLING.md), and [MCPB packaging](MCPB.md).
+For the current callable interface, use [TOOLS.md](TOOLS.md) and the running
+server's MCP `tools/list` schema.

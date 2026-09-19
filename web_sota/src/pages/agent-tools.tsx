@@ -8,7 +8,7 @@ import {
   Server,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   callTool,
   clearPreviews,
@@ -40,7 +40,7 @@ export function AgentTools() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
-  const [previews, setPreviews] = useState<PreviewRecord[]>([]);
+  const [previews, setPreviews] = useState<PreviewRecord[]>(loadPreviews);
 
   const [inputPath, setInputPath] = useState(
     "D:/Temp/inkscape_mcp/diagram.svg",
@@ -65,10 +65,6 @@ export function AgentTools() {
     { id: "analysis", label: "Analysis", icon: Search },
     { id: "fleet", label: "Fleet", icon: GitPullRequest },
   ];
-
-  useEffect(() => {
-    setPreviews(loadPreviews());
-  }, []);
 
   const run = async (tool: string, params: Record<string, unknown>) => {
     setLoading(true);

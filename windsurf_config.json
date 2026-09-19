@@ -4,37 +4,12 @@
       "command": "uv",
       "args": [
         "--directory",
-        "D:/Dev/repos/inkscape-mcp",
+        "/absolute/path/to/inkscape-mcp",
         "run",
-        "inkscape-mcp"
-      ],
-      "description": "Inkscape MCP (FastMCP 3.1+): file, vector, analysis, system tools",
-      "capabilities": {
-        "tools": {
-          "enabled": true,
-          "listChanged": true
-        },
-        "resources": {
-          "enabled": true,
-          "listChanged": true,
-          "subscribe": true
-        },
-        "prompts": {
-          "enabled": true
-        }
-      },
-      "timeout": {
-        "initialize": 30000,
-        "message": 120000
-      },
-      "metadata": {
-        "version": "2.0.0b0",
-        "author": "Sandra Schipal",
-        "homepage": "https://github.com/sandraschi/inkscape-mcp",
-        "license": "MIT",
-        "tags": ["vector-graphics", "svg", "inkscape", "mcp"],
-        "categories": ["Design", "Development"]
-      }
+        "inkscape-mcp",
+        "--mode",
+        "stdio"
+      ]
     }
   }
 }

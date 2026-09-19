@@ -1,189 +1,122 @@
-# Inkscape MCP — LLM full manifest
+# Inkscape MCP: operational guide for agents
 
-Version **2.6.0** (see `pyproject.toml`). Stack: **Python 3.12+**, **FastMCP ≥3.1**, **Inkscape** with CLI.
+The running server's MCP `tools/list` schema is authoritative. Reconnect after
+code updates. Do not send undocumented kwargs or an injected FastMCP Context.
+The complete operation and parameter reference is [docs/TOOLS.md](docs/TOOLS.md).
 
----
+## Setup
 
-## Tools
+- Source: https://github.com/GianluDeveloper/inkscape-mcp
+- Entry point: `uv run inkscape-mcp --mode stdio`.
+- Requirements: Python 3.12+, uv, Inkscape CLI. Native GUI bridge: Linux, Inkscape
+  1.3+, gdbus, installed native effect, access to the user's desktop session.
+- Tested development host: Ubuntu 26.04.1 LTS, Python 3.12.14, Inkscape 1.4.4.
+- [INSTALL.md](INSTALL.md) includes GTK/Cairo/PyGObject build dependencies.
+- Run `inkscape_system` / `status`; inspect `data.inkscape.available`, not just
+  the success of the status request.
 
-### inkscape_file
+Transport defaults to stdio. Explicit CLI options override the environment.
+For the optional browser dashboard:
 
-Operations: **load**, **save**, **convert**, **info**, **validate**, **list_formats**.
-
-Typical args: `operation`, `input_path`, `output_path`, `format` (for convert).
-
-### inkscape_vector
-
-Operations:
-
-`trace_image`, `generate_barcode_qr`, `create_mesh_gradient`, `text_to_path`, `construct_svg`, `apply_boolean`, `path_inset_outset`, `path_simplify`, `path_clean`, `path_combine`, `path_break_apart`, `object_to_path`, `optimize_svg`, `scour_svg`, `measure_object`, `query_document`, `count_nodes`, `export_dxf`, `layers_to_files`, `fit_canvas_to_drawing`, `render_preview`, `generate_laser_dot`, `object_raise`, `object_lower`, `set_document_units`.
-
-Many operations accept extra kwargs (e.g. barcode data, DPI, boolean `operation_type`); see tool docstrings and `docs/USAGE.md`.
-
-### inkscape_analysis
-
-Operations: **quality**, **statistics**, **validate**, **objects**, **dimensions**, **structure**.
-
-### inkscape_system
-
-Operations: **status**, **help**, **diagnostics**, **version**, **config**, **list_extensions**, **execute_extension** (when enabled).
-
-### list_local_models
-
-No required args — returns discovered local LLM endpoints (Ollama / LM Studio) when reachable.
-
-### generate_heraldry
-
-Args: `operation` (`trumponia` | `custom`), `output_path`, optional `ctx` for future sampling hooks. **custom** may return not-implemented.
-
-### Agentic / sampling (optional)
-
-Registered when `agentic` imports succeed and the host supports MCP sampling:
-
-- **generate_svg** — multi-step SVG generation via `ctx.sample()` / SEP-1577 loop
-- **agentic_inkscape_workflow** — orchestrated workflows
-- **intelligent_vector_processing** — vector-focused agentic path
-- **conversational_inkscape_assistant** — dialog-style assistance
-
-If sampling is unavailable, these tools return structured errors; use non-agentic `inkscape_*` tools instead. Details: `docs/AI_SAMPLING.md`.
-
----
-
-## MCP prompts (registered)
-
-| URI | Purpose |
-|-----|---------|
-| `prompt://inkscape/svg-file-workflow` | load / convert / validate flows |
-| `prompt://inkscape/vector-editing-workflow` | vector ops and booleans |
-| `prompt://inkscape/analysis-workflow` | inspect before edit |
-| `prompt://inkscape/sampling-agentic-workflow` | when to use agentic tools |
-| `prompt://inkscape/heraldry-workflow` | heraldry generation |
-
----
-
-## MCP resources (registered)
-
-| URI | Purpose |
-|-----|---------|
-| `resource://inkscape/capabilities` | short capability summary |
-| `resource://inkscape/skills` | operation cheat sheet for LLMs |
-
----
-
-## Environment
-
-| Variable | Role |
-|----------|------|
-| `MCP_TRANSPORT` | `stdio` (default for many clients) or `http` |
-| `MCP_HOST` | HTTP bind (default `127.0.0.1`) |
-| `MCP_PORT` | HTTP port (default **11028** in this project) |
-| `MCP_PATH` | HTTP MCP path (default `/mcp`) |
-| `INKSCAPE_PATH` / config | Override Inkscape executable |
-| `INKSCAPE_MCP_CONFIG_PATH` | Optional YAML config path |
-| `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | REST `/api/generate-svg` and health |
-| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | Optional cloud fallbacks in REST SVG pipeline |
-| `INKSCAPE_SAVE_DIR` | Default output dir for REST-generated SVGs (see `app.py`) |
-
-Config file fields (YAML) commonly include: `inkscape_executable`, `process_timeout`, `max_concurrent_processes`, `allowed_directories`, `temp_directory` — see `docs/` and sample config in repo.
-
----
-
-## Run
-
-### Obtain source first (fleet bar)
-
-```text
-git clone https://github.com/sandraschi/inkscape-mcp.git
-cd inkscape-mcp
-uv sync
+```bash
+uv run inkscape-mcp --mode http --host 127.0.0.1 --port 11028
 ```
 
-### MCP stdio (typical IDE)
+In `web_sota/`, use Bun 1.3.14 and `bun install --frozen-lockfile`, then
+`bun run dev`. Frontend 11029 proxies to backend 11028. The standalone CLI HTTP
+default is 11027. `--mode dual` is an HTTP alias, not two listeners. Use `/mcp`
+for MCP and `/api/health` for the optional REST health helper.
 
-```text
-uv run inkscape-mcp --mode stdio
-```
+## Select a tool
 
-Or with explicit transport via env:
+| Tool | Purpose |
+| --- | --- |
+| inkscape_file | File load/validation, metadata, export/conversion |
+| inkscape_vector | Construct SVG, path operations, queries, previews |
+| inkscape_analysis | Inspect a file's objects, structure, dimensions, statistics |
+| inkscape_render | Preview PNGs and multi-DPI exports |
+| inkscape_validation | SVG quality, viewBox, size, pack checks |
+| inkscape_system | Diagnostics, installed actions, native desktop/session operations |
+| inkscape_fleet | External application handoffs and staging |
+| inkscape_fab_art | Fabrication and robotics asset workflows |
+| inkscape_sim_art | UI/icon sheets and simulation asset workflows |
+| list_local_models | Discover local Ollama/LM Studio models |
+| llm_ops | Manage local model engines and resident models |
+| generate_heraldry | Fixed heraldic preset; custom operation is unimplemented |
+| generate_svg | Generate and save SVG using client sampling |
+| agentic_inkscape_workflow | Sampling-assisted workflow plan |
+| intelligent_vector_processing | Sampling-assisted document processing plan |
+| conversational_inkscape_assistant | Sampling-assisted vector graphics guidance |
 
-```text
-set MCP_TRANSPORT=stdio
-uv run inkscape-mcp
-```
+Some enumerated vector operations remain incomplete: consult the limits in
+TOOLS.md. In particular, the legacy QR helper is a text placeholder, not a
+scannable encoder; mesh-gradient construction is unimplemented. Layer/animation
+Python and REST helpers are not standalone tools in the main MCP registration.
 
-(PowerShell: `$env:MCP_TRANSPORT="stdio"` then `uv run inkscape-mcp`.)
+## File workflows
 
-### HTTP (MCP + REST + dashboard backend)
+Use absolute paths. `construct_svg` accepts complete SVG XML in `svg_content` and
+an explicit `output_path`; no model service or sampling is required. An alternate
+`params` object accepts `body` and optional `header`/`footer`.
 
-```text
-uv run inkscape-mcp --mode http --port 11028
-```
+File edits use supplied input/output paths. `inkscape_file` / `save` does not save
+the unsaved desktop window. Managed exports stage and validate results before
+replacing destinations. Check `success`, `message`, and output metadata before
+proceeding. Unknown actions and missing IDs can fail even if native exit code is 0.
 
-### Web dashboard (separate terminal, from `web_sota`)
+## Live workflows
 
-Follow project webapp docs; Vite dev server uses **11029** and proxies to **11028**.
+All operations below use `inkscape_system`:
 
-### PyPI / uvx (consumers)
+1. `install_live_extension`: explicit install into the target user's Inkscape
+   profile. Restart windows opened before installation; inspect `needs_restart`.
+2. `list_documents`: list live sessions. `desktop` identifies the ordinary
+   Inkscape instance and requires exactly one window there.
+3. `new_document(output_path)` creates an 800×600 SVG at a new path and launches
+   its own instance; `open_document(input_path)` opens an existing SVG. Retain the
+   returned `session_id`; reopening the same live managed path reuses its session.
+4. `active_document(session_id)` reads unsaved SVG and object details.
+5. `insert_svg(session_id, svg_content)` uses the native undoable effect;
+   `draw_test(session_id, text)` inserts a blue rounded rectangle and editable text.
+6. Confirm `data.verified` and object IDs after insertion. The effect appends a
+   nested SVG with its coordinates/viewBox. Use fresh IDs or omit them; collisions
+   are rejected. No clipboard helper is required.
+7. `save_document(session_id)` saves a managed drawing to its original path and
+   verifies disk content. `save_copy(session_id, output_path)` exports a verified
+   snapshot without changing the GUI filename; it also works for `desktop`.
+8. `close_document(session_id)` requests a managed document's normal close. An
+   unsaved-changes dialog keeps it open; the server does not choose Discard.
 
-```text
-uvx inkscape-mcp --help
-```
+Always use the returned session ID to target one of several documents. Unknown,
+closed, or ambiguous targets do not fall back to another drawing. If an edit times
+out or cannot be verified, inspect the target before retrying: it may already
+have been applied. Preserve user edits and avoid duplicate insertion.
 
----
+`list_actions(search, limit, offset)` discovers the installed CLI catalog with
+bounded pagination. Catalog presence is not a guarantee of headless or D-Bus
+availability. `hands_in_command(action)` dispatches normal native actions;
+`active-window-start` and `active-window-end` are internal and rejected.
 
-## Architecture (sketch)
+## Sampling and optional providers
 
-- **Entry:** `inkscape_mcp.main` → `InkscapeMCPServer` → `FastMCP` instance
-- **Tools:** `tools/file_operations.py`, `vector_operations.py`, `analysis.py`, `system.py`, `heraldry.py`, `llm_discovery.py`; wrappers in `main.py` for dependency injection (`cli_wrapper`, `config`)
-- **Agentic:** `agentic.py` (sampling)
-- **Prompts/resources:** `prompts_resources.py`
-- **Transport:** `transport.py` (stdio / HTTP / env bridge)
-- **REST:** `app.py` mounts on FastMCP HTTP (`/api/health`, `/api/help`, `/api/logs`, …)
-- **MCPB:** `mcp-server/` tree, `tools/sync_mcpb_src.py`, `tools/pack_mcpb.py`
+Sampling tools require client support for `sampling.tools`; Context is injected.
+Workflow tools return plans, which must be executed with the real editing tools.
+The dashboard's Ollama/cloud path is separately configured. Ordinary editing,
+construction, inspection, and export work without either model path.
 
----
+## Configuration and provenance
 
-## MCP client snippets
+Use `--config` for explicit YAML. `INKSCAPE_PATH` supplies executable discovery;
+`MCP_TRANSPORT`, `MCP_HOST`, and `MCP_PORT` control transport. See
+[Configuration](docs/CONFIGURATION.md) for defaults and file restrictions.
+The main CLI does not automatically load arbitrary `.env` files; supply exported
+variables or the client's environment settings.
 
-### uv (recommended, repo root)
+Managed state lives under `~/.cache/inkscape-mcp/` by default (`XDG_CACHE_HOME`
+can override it). Extension installation uses the Inkscape profile selected by
+`INKSCAPE_PROFILE_DIR` or the XDG config location. Do not edit active exchange
+files. Desktop access requires the same user's display and session D-Bus services.
 
-```json
-{
-  "mcpServers": {
-    "inkscape-mcp": {
-      "command": "uv",
-      "args": ["--directory", "${workspaceFolder}", "run", "inkscape-mcp", "--mode", "stdio"]
-    }
-  }
-}
-```
-
-### python module (when package on `PYTHONPATH`)
-
-```json
-{
-  "command": "python",
-  "args": ["-m", "inkscape_mcp.main", "--mode", "stdio"],
-  "env": { "PYTHONPATH": "${workspaceFolder}/src" }
-}
-```
-
-See also `cursor-mcp-config.json` and `glama.json` in the repo root.
-
----
-
-## Troubleshooting (top issues)
-
-1. **Inkscape not found** — Install Inkscape; set `INKSCAPE_PATH` or PATH; run `inkscape --version` locally.
-2. **Permission / path denied** — Configure `allowed_directories` and use paths inside it.
-3. **Agentic tools fail** — Host does not support sampling; use `inkscape_*` tools manually.
-4. **HTTP / dashboard empty** — Start server with `--mode http` and matching `MCP_PORT`; start Vite on **11029**.
-5. **MCPB out of date** — Run `just mcpb-pack` after code changes; reinstall bundle in Claude Desktop.
-
----
-
-## Fleet / related docs
-
-Central standards: **mcp-central-docs** (`DOCUMENTATION_STANDARDS.md`, `PACKAGING_STANDARDS.md` §5, `SOTA_REQUIREMENTS.md`).
-
-This file should be updated in the same PR as tool or operation renames.
+This repository continues sandraschi/inkscape-mcp and adapts native effect work
+from aravindev/inkscape_mcp. See [NOTICE.md](NOTICE.md) and
+[Upstream integration](docs/UPSTREAM_INTEGRATION.md) for exact provenance.

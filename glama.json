@@ -14,7 +14,7 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       },
-      "description": "Inkscape CLI MCP server (FastMCP 3.1+): portmanteau tools for SVG/vector workflows, optional heraldry and SEP-1577 agentic tools when sampling is available; MCP prompts/resources; HTTP+REST optional.",
+      "description": "Inkscape SVG, vector and live document workflows over MCP. FastMCP 3.4+, stdio and HTTP transports.",
       "capabilities": {
         "tools": {
           "enabled": true,
@@ -36,7 +36,7 @@
       "metadata": {
         "version": "2.6.0",
         "author": "Sandra Schipal",
-        "homepage": "https://github.com/sandraschi/inkscape-mcp",
+        "homepage": "https://github.com/GianluDeveloper/inkscape-mcp",
         "license": "MIT",
         "tags": [
           "inkscape",
@@ -48,18 +48,28 @@
           "design",
           "creative-tools"
         ],
-        "categories": ["Design", "Productivity", "Creative", "Development"]
+        "categories": [
+          "Design",
+          "Productivity",
+          "Creative",
+          "Development"
+        ]
       }
     }
   },
-  "maintainers": ["sandraschi"],
+  "maintainers": [
+    "GianluDeveloper"
+  ],
   "name": "inkscape-mcp",
-  "description": "MCP server for Inkscape-backed SVG and vector operations. FastMCP 3.1+ with portmanteau tools, registered prompts/resources, optional sampling agentic workflows, REST bridge on HTTP, and MCPB packaging.",
+  "description": "Inkscape SVG, vector and live document workflows over MCP. FastMCP 3.4+, stdio and HTTP transports.",
   "type": "mcp_server",
   "status": "beta",
   "framework": "FastMCP 3.4+",
   "tools": 16,
-  "transport": ["stdio", "http"],
+  "transport": [
+    "stdio",
+    "http"
+  ],
   "keywords": [
     "inkscape",
     "svg",
@@ -82,18 +92,32 @@
     },
     "document_analysis": {
       "enabled": true,
-      "capabilities": ["statistics", "validate", "dimensions", "structure"]
+      "capabilities": [
+        "statistics",
+        "validate",
+        "dimensions",
+        "structure"
+      ]
     },
     "agentic_sampling": {
       "enabled": true,
-      "capabilities": ["sep_1577", "generate_svg", "workflow_orchestration"]
+      "capabilities": [
+        "sep_1577",
+        "generate_svg",
+        "workflow_orchestration"
+      ]
     },
     "mcpb_packaging": {
       "enabled": true
     },
     "rest_bridge": {
       "enabled": true,
-      "capabilities": ["health", "help", "logs", "generate_svg_ollama"]
+      "capabilities": [
+        "health",
+        "help",
+        "logs",
+        "generate_svg_ollama"
+      ]
     }
   }
 }

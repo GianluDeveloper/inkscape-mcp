@@ -19,14 +19,20 @@ interface Layer {
   style?: string | null;
 }
 
-async function callTool(tool: string, params: Record<string, any>) {
+interface LayerResponse {
+  success?: boolean;
+  error?: string;
+  data?: { layers?: Layer[] };
+}
+
+async function callTool(tool: string, params: Record<string, unknown>) {
   const r = await fetch(`${API_BASE}/v1/tool`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool, params }),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const body = await r.json();
+  const body: LayerResponse = await r.json();
   if (body.success === false) throw new Error(body.error || "Tool call failed");
   return body;
 }
@@ -48,15 +54,15 @@ export function LayerManager() {
         input_path: inputPath,
       });
       setLayers(r?.data?.layers || []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, [inputPath]);
 
   const doOp = useCallback(
-    async (operation: string, extra: Record<string, any> = {}) => {
+    async (operation: string, extra: Record<string, unknown> = {}) => {
       setLoading(true);
       setError(null);
       try {
@@ -70,8 +76,8 @@ export function LayerManager() {
         } else {
           await load();
         }
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setLoading(false);
       }
@@ -91,8 +97,8 @@ export function LayerManager() {
       });
       setNewLabel("");
       await load();
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }

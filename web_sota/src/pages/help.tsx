@@ -14,18 +14,34 @@ const TABS = [
 ];
 
 function Markdown({ path }: { path: string }) {
-  const [md, setMd] = useState("");
-  const [err, setErr] = useState<string | null>(null);
+  const [document, setDocument] = useState<{
+    path: string;
+    text: string;
+    error: string | null;
+  } | null>(null);
+  const md = document?.path === path ? document.text : "";
+  const err = document?.path === path ? document.error : null;
   useEffect(() => {
-    setMd("");
-    setErr(null);
-    fetch(`${API_BASE}/api/docs/${path}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
+    const controller = new AbortController();
+    fetch(`${API_BASE}/api/docs/${path}`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
       })
-      .then(setMd)
-      .catch((e) => setErr(e.message));
+      .then((text) => {
+        if (!controller.signal.aborted)
+          setDocument({ path, text, error: null });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setDocument({
+            path,
+            text: "",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+    return () => controller.abort();
   }, [path]);
   if (err) return <p className="text-yellow-400">Failed to load: {err}</p>;
   if (!md) return <p className="text-slate-300">Loading...</p>;
@@ -70,7 +86,7 @@ export function Help() {
           <Markdown path="README.md" />
         </TabsContent>
         <TabsContent value="inkscape" className="mt-6">
-          <Markdown path="INKSCAPE.md" />
+          <Markdown path="USAGE.md" />
         </TabsContent>
         <TabsContent value="tools" className="mt-6">
           <Markdown path="TOOLS.md" />

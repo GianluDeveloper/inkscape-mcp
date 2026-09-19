@@ -1,0 +1,13 @@
+# The image only needs package sources and locked build metadata.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!NOTICE.md
+!src/
+!src/**
+src/**/__pycache__/
+src/**/*.pyc

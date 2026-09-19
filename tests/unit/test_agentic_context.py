@@ -39,7 +39,9 @@ async def test_context_is_not_a_public_tool_argument(agentic_server):
 
 
 @pytest.mark.parametrize(("tool_name", "arguments"), TOOL_ARGUMENTS)
-async def test_real_client_receives_injected_context(agentic_server, tmp_path, monkeypatch, tool_name, arguments):
+async def test_real_client_receives_injected_context(
+    agentic_server, tmp_path, monkeypatch, tool_name, arguments
+):
     monkeypatch.chdir(tmp_path)
     sampling_requests = []
 
@@ -72,7 +74,9 @@ async def test_generate_svg_explains_missing_sampling_capabilities(
     async def sample(_messages, _params, _context):
         pytest.fail("The unsupported sampling request must not be sent to the client")
 
-    async with Client(agentic_server, sampling_handler=sample if supports_plain_sampling else None) as client:
+    async with Client(
+        agentic_server, sampling_handler=sample if supports_plain_sampling else None
+    ) as client:
         result = await client.call_tool("generate_svg", {"description": "a stylized sun"})
 
     assert result.data["success"] is False

@@ -7,7 +7,7 @@ type LogEntry = {
   level: string;
   kind: string;
   detail: string;
-  meta: Record<string, any>;
+  meta: Record<string, unknown>;
 };
 
 const LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"];
@@ -27,9 +27,9 @@ export default function Logging() {
   const [level, setLevel] = useState("");
   const [kind, setKind] = useState("");
   const [search, setSearch] = useState("");
-  const [sort, _setSort] = useState("desc");
+  const sort = "desc";
   const [tail, setTail] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
   const [showClear, setShowClear] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,9 +39,13 @@ export default function Logging() {
     undefined,
   );
 
+  const queryKey = JSON.stringify([limit, offset, level, kind, search, sort]);
+  const loading = loadedQuery !== queryKey;
   const fetchLogs = useCallback(
-    async (opts: { tail?: boolean; after_id?: string } = {}) => {
-      setLoading(true);
+    (
+      opts: { tail?: boolean; after_id?: string } = {},
+      signal?: AbortSignal,
+    ) => {
       const params = new URLSearchParams();
       params.set("limit", String(limit));
       params.set("offset", String(offset));
@@ -50,42 +54,54 @@ export default function Logging() {
       if (kind) params.set("kind", kind);
       if (search) params.set("search", search);
       if (opts.after_id) params.set("after_id", opts.after_id);
-      try {
-        const r = await fetch(`${API_BASE}/api/logs?${params}`);
-        const d = await r.json();
-        const logs = d.logs ?? [];
-        if (opts.tail && opts.after_id) {
-          setEntries((prev) => [...prev, ...logs].slice(-200));
-        } else {
-          setEntries(logs);
-        }
-        setTotal(d.total);
-        if (logs.length > 0) {
-          afterIdRef.current = logs[logs.length - 1].id;
-        }
-      } catch (e) {
-        console.error("Log fetch failed", e);
-      } finally {
-        setLoading(false);
-      }
+      return fetch(`${API_BASE}/api/logs?${params}`, { signal })
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json() as Promise<{
+            logs?: LogEntry[];
+            total?: number;
+          }>;
+        })
+        .then((data) => {
+          if (signal?.aborted) return;
+          const logs = data.logs ?? [];
+          if (opts.tail && opts.after_id) {
+            setEntries((previous) => [...previous, ...logs].slice(-200));
+          } else {
+            setEntries(logs);
+          }
+          setTotal(data.total ?? logs.length);
+          if (logs.length > 0) afterIdRef.current = logs[logs.length - 1].id;
+        })
+        .catch((error: unknown) => {
+          if (!signal?.aborted) console.error("Log fetch failed", error);
+        })
+        .finally(() => {
+          if (!signal?.aborted) setLoadedQuery(queryKey);
+        });
     },
-    [limit, offset, level, kind, search, sort],
+    [limit, offset, level, kind, search, sort, queryKey],
   );
 
   useEffect(() => {
-    fetchLogs();
+    const controller = new AbortController();
+    void fetchLogs({}, controller.signal);
+    return () => controller.abort();
   }, [fetchLogs]);
 
   useEffect(() => {
     if (!tail) return;
-    const iv = setInterval(() => {
-      if (afterIdRef.current) {
-        fetchLogs({ tail: true, after_id: afterIdRef.current });
-      } else {
-        fetchLogs({ tail: true });
-      }
+    const controller = new AbortController();
+    const interval = setInterval(() => {
+      void fetchLogs(
+        { tail: true, after_id: afterIdRef.current ?? undefined },
+        controller.signal,
+      );
     }, 2000);
-    return () => clearInterval(iv);
+    return () => {
+      clearInterval(interval);
+      controller.abort();
+    };
   }, [tail, fetchLogs]);
 
   useEffect(() => {

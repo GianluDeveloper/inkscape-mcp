@@ -1,37 +1,64 @@
-# Claude Desktop (MCPB)
+# MCPB packaging
 
-Claude Desktop can install servers from a **`.mcpb`** file (drag-and-drop in settings).
+Source installation in [INSTALL.md](../INSTALL.md) is the canonical setup for
+this revision. MCPB packaging sources are retained for maintainers; a successful
+source checkout does not establish that a published bundle contains the same code.
 
-## Get a bundle
+## Publication status
 
-- **Build from this repo** (requires [Node.js](https://nodejs.org/) for `@anthropic-ai/mcpb`):
+MCP Registry publication is not configured for this fork. CI builds Python
+distributions and the dashboard for validation; it does not publish packages or
+create GitHub releases. The inherited `server.json` referenced another
+repository's release asset and checksum, so it and the automatic registry
+publication workflow were removed.
 
-  ```bash
-  just mcpb-pack
-  ```
+Before configuring publication, build and test an actual bundle from this
+repository, choose a registry namespace owned by its maintainer, and generate
+metadata containing that artifact's real release URL and SHA-256. Do not reuse
+upstream release metadata. Original authorship is preserved in the Python
+metadata, [LICENSE](../LICENSE), and [NOTICE.md](../NOTICE.md).
 
-  or:
+## Source layouts
 
-  ```bash
-  uv run python tools/pack_mcpb.py
-  ```
+- `src/inkscape_mcp/` is the canonical Python package.
+- `mcpb/` contains a manifest, bootstrap, dependency metadata, and PowerShell packer.
+- `mcp-server/` is the older packaging layout used by the Python packaging scripts.
+- `mcpb/src/` and `mcp-server/src/` are generated copies. Do not edit or commit them.
 
-  Output: **`dist/inkscape-mcp-v<version>.mcpb`** at the repository root.
+## Current PowerShell workflow
 
-- Details and layout rules: [mcp-server/README.md](../mcp-server/README.md) and [mcp-central-docs MCPB standards](https://github.com/sandraschi/mcp-central-docs/blob/master/standards/MCPB_PACKAGING_STANDARDS.md).
+The `mcpb/pack.ps1` script requires PowerShell 7, Bun, uv, and a prepared Windows
+virtual environment. It stages the canonical package, validates the bundle,
+packs it, unpacks it for a startup check, and removes the staging copy.
+The stage also receives the root `pyproject.toml`, `uv.lock`, `LICENSE`, and
+`NOTICE.md`; its uv launcher installs locked runtime dependencies with
+`--frozen --no-dev` and explicitly selects stdio.
 
-## What MCPB contains
+```powershell
+uv sync --group dev
+pwsh -File mcpb/pack.ps1
+```
 
-- `manifest.json`, prompts under `assets/prompts/`, icon, and **`src/inkscape_mcp/`** (synced from the main package at pack time).
+Read the script's output for the artifact location. Its startup check establishes
+that staged imports/startup work in the existing development environment; it does
+not prove dependency completeness on a clean consumer machine or a successful
+MCP handshake.
 
-## What stays outside the bundle
+The alternative below stages the `mcp-server/` layout and requires Node.js/npm:
 
-- **`glama.json`** is for repo-based clients only — it is **not** inside `.mcpb`.
+```bash
+uv run python tools/pack_mcpb.py
+```
 
-## Python dependencies
+This produces `dist/inkscape-mcp-v2.6.0.mcpb` and includes the native extension
+and attribution files. Its Python launcher expects the runtime dependencies to
+be installed already. It is a developer bundle, not the Ubuntu source
+installation path or a self-contained Inkscape installer.
 
-MCPB does not vendor Python wheels. The user’s environment must be able to run the server and satisfy imports (same as other Anthropic MCPB Python servers). If Claude Desktop uses its own Python, follow its docs for dependency install.
+## Release checklist
 
-## Config fields in Claude
-
-Use the MCPB install UI for path/timeouts. Optional `config.yaml` next to the unpacked layout may apply when referenced by `INKSCAPE_MCP_CONFIG_PATH` in the manifest — see `mcp-server/manifest.json`.
+Before distributing a bundle, verify its manifest and dependency declarations
+against the current source, perform a real MCP connection using the unpacked
+bundle, and test native Inkscape operations. Inkscape and any desktop extension
+installation remain external application dependencies. Preserve upstream license
+and attribution files for adapted components.

@@ -1,5 +1,5 @@
 import { Info, RefreshCw, Server } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -43,38 +43,42 @@ export function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [llmProviders, setLlmProviders] = useState<LlmProvider[]>([]);
 
-  const load = async () => {
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/health`);
-      if (!res.ok) {
-        setError(`HTTP ${res.status}`);
+  const load = useCallback((signal?: AbortSignal) => {
+    return fetch(`${API_BASE}/api/health`, { signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<HealthPayload>;
+      })
+      .then((data) => {
+        if (signal?.aborted) return;
+        setHealth(data);
+        setError(null);
+      })
+      .catch((error: unknown) => {
+        if (signal?.aborted) return;
         setHealth(null);
-        return;
-      }
-      setHealth(await res.json());
-    } catch (e) {
-      setHealth(null);
-      setError(e instanceof Error ? e.message : "Failed to load /api/health");
-    }
-  };
-
-  const loadProviders = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/llm/providers`);
-      if (res.ok) {
-        const d = await res.json();
-        setLlmProviders(d.providers || []);
-      }
-    } catch {
-      // ignore
-    }
-  };
+        setError(
+          error instanceof Error ? error.message : "Failed to load /api/health",
+        );
+      });
+  }, []);
 
   useEffect(() => {
-    void load();
-    void loadProviders();
-  }, []);
+    const controller = new AbortController();
+    void load(controller.signal);
+    fetch(`${API_BASE}/api/llm/providers`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<{ providers?: LlmProvider[] }>;
+      })
+      .then((data) => {
+        if (!controller.signal.aborted) setLlmProviders(data.providers ?? []);
+      })
+      .catch(() => {
+        /* Provider status is optional on this page. */
+      });
+    return () => controller.abort();
+  }, [load]);
 
   const ink = health?.providers?.inkscape;
   const oll = health?.providers?.ollama;

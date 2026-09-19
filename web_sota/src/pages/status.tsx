@@ -1,5 +1,5 @@
 import { Activity, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import API_BASE from "@/lib/api";
@@ -9,28 +9,32 @@ export function Status() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/health`);
-      if (!res.ok) {
-        setError(`HTTP ${res.status}`);
+  const load = useCallback((signal?: AbortSignal) => {
+    return fetch(`${API_BASE}/api/health`, { signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<unknown>;
+      })
+      .then((result) => {
+        if (signal?.aborted) return;
+        setData(result);
+        setError(null);
+      })
+      .catch((error: unknown) => {
+        if (signal?.aborted) return;
         setData(null);
-        return;
-      }
-      setData(await res.json());
-    } catch (e) {
-      setData(null);
-      setError(e instanceof Error ? e.message : "Request failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+        setError(error instanceof Error ? error.message : "Request failed");
+      })
+      .finally(() => {
+        if (!signal?.aborted) setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, []);
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   return (
     <div className="space-y-6" data-testid="status-page">
@@ -47,7 +51,11 @@ export function Status() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => void load()}
+          onClick={() => {
+            setLoading(true);
+            setError(null);
+            void load();
+          }}
           disabled={loading}
           className="border-slate-800 text-slate-300"
         >

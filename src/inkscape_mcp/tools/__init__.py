@@ -12,7 +12,9 @@ TOOLS:
 - inkscape_system: System operations (status, help, diagnostics, version, config)
 """
 
+import inspect
 import logging
+from functools import wraps
 from typing import Any
 
 from .analysis import inkscape_analysis
@@ -158,10 +160,24 @@ PORTMANTEAU_TOOLS = [
             "status",
             "execution_mode",
             "hands_in_command",
+            "active_document",
+            "insert_svg",
+            "draw_test",
+            "list_actions",
+            "list_documents",
+            "open_document",
+            "new_document",
+            "install_live_extension",
+            "save_document",
+            "save_copy",
+            "close_document",
             "help",
             "diagnostics",
             "version",
             "config",
+            "list_extensions",
+            "execute_extension",
+            "self_terminate",
         ],
     },
     {
@@ -207,11 +223,31 @@ def get_tool_metadata():
     return PORTMANTEAU_TOOLS
 
 
+def _bind_dependencies(function: Any, cli_wrapper: Any, config: Any) -> Any:
+    """Keep server dependencies out of MCP schemas and bind them per server."""
+    signature = inspect.signature(function, eval_str=True)
+    dependencies = {
+        name: value
+        for name, value in {"cli_wrapper": cli_wrapper, "config": config}.items()
+        if name in signature.parameters
+    }
+
+    @wraps(function)
+    async def bound(**kwargs):
+        kwargs.update(dependencies)
+        return await function(**kwargs)
+
+    bound.__signature__ = signature.replace(
+        parameters=[p for name, p in signature.parameters.items() if name not in dependencies]
+    )
+    return bound
+
+
 def register_all_tools(mcp: Any, cli_wrapper: Any, config: Any) -> None:
     """Register all portmanteau tools with the MCP server."""
     # Register core portmanteau tools
     for tool_info in PORTMANTEAU_TOOLS:
-        mcp.tool()(tool_info["function"])
+        mcp.tool()(_bind_dependencies(tool_info["function"], cli_wrapper, config))
 
     # Register specialized tools
     register_heraldry_tools(mcp, cli_wrapper, config)

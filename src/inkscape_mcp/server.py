@@ -21,12 +21,13 @@ logger = logging.getLogger(__name__)
 # proxy for uvicorn: on first request it constructs the server and delegates to
 # mcp.http_app() (the raw FastMCP object is NOT ASGI-callable in FastMCP 3.x).
 class _LazyASGI:
-    _inner = None
+    def __init__(self):
+        self._inner = None
 
     def _ensure(self):
-        if _LazyASGI._inner is None:
-            _LazyASGI._inner = InkscapeMcpServer().mcp.http_app()
-        return _LazyASGI._inner
+        if self._inner is None:
+            self._inner = InkscapeMcpServer().app
+        return self._inner
 
     async def __call__(self, scope: dict, receive, send) -> None:
         await self._ensure()(scope, receive, send)
@@ -53,17 +54,11 @@ class InkscapeMcpServer:
         """
         self.config = config or InkscapeConfig.load_default()
         self.mcp = FastMCP("Inkscape MCP", version="1.2.0")
-        self.app = self.mcp  # Add app attribute for ASGI compatibility
-
-        # Set module-level app for ASGI loader
-        import inkscape_mcp.server
-
-        inkscape_mcp.server.app = self.mcp
 
         self.tools = {}  # Store tool instances for later reference
         self.inkscape = InkscapeCliWrapper(self.config)
         self.logger = logging.getLogger(__name__)
-        self.cli_wrapper: Any | None = None
+        self.cli_wrapper: Any | None = self.inkscape
 
         self._register_tools()
 
@@ -75,6 +70,10 @@ class InkscapeMcpServer:
             register_rest_api(self.mcp, self.config)
         except Exception as e:  # pragma: no cover - defensive, bridge is optional
             self.logger.warning("Failed to register REST API bridge: %s", e)
+
+        # FastMCP itself is not ASGI-callable. Keep the module-level lazy proxy
+        # stable and expose the actual HTTP application only after routes exist.
+        self.app = self.mcp.http_app()
 
         logger.info("Inkscape MCP Server initialized")
 

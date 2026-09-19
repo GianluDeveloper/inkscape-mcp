@@ -1,48 +1,58 @@
-# SVG Examples Catalog
+# SVG examples
 
-Production-grade SVG vector files for testing, demonstration, and automated workflow validation with `inkscape-mcp`.
+These editable SVG files are small fixtures for inspection, rendering, and
+file-editing workflows. Open them directly in Inkscape or use the
+[documented MCP tools](../docs/TOOLS.md).
 
-## Examples Included
+| File | Contents |
+| --- | --- |
+| [live-demo.svg](live-demo.svg) | Native desktop acceptance output with an editable rectangle and Unicode text |
+| [logo_badge.svg](logo_badge.svg) | Gradients, text on a path, a shadow filter, and named layers |
+| [technical_diagram.svg](technical_diagram.svg) | Labeled nodes, arrow markers, connectors, and a grid |
+| [laser_cut_template.svg](laser_cut_template.svg) | Color-coded outlines, engraving artwork, and registration marks |
+| [ui_icons.svg](ui_icons.svg) | Four grouped icons with object IDs |
+| [layered_illustration.svg](layered_illustration.svg) | A landscape separated into four Inkscape layers |
 
-| File | Purpose | Key SVG Features / Layers | Test Operations |
-|---|---|---|---|
-| [`logo_badge.svg`](file:///d:/Dev/repos/inkscape-mcp/examples/logo_badge.svg) | Brand badge / Emblem | Radial & linear gradients, `<textPath>`, drop shadows, layer hierarchy (`Background`, `Emblem`, `Text & Banner`) | `render_preview`, `text_to_path`, `export_dxf` |
-| [`technical_diagram.svg`](file:///d:/Dev/repos/inkscape-mcp/examples/technical_diagram.svg) | Architecture & Flowchart | Labeled nodes, marker arrows, dashed stroke connectors, structured layers (`Grid`, `Connectors`, `Nodes`) | `query_document`, `measure_object`, `objects` |
-| [`laser_cut_template.svg`](file:///d:/Dev/repos/inkscape-mcp/examples/laser_cut_template.svg) | CNC / Laser Cut Pattern | Red vector cut strokes (`#FF0000`), blue vector scoring (`#0000FF`), black raster engraving (`#000000`), crosshair registration marks | `layers_to_files`, `export_dxf`, `set_document_units` |
-| [`ui_icons.svg`](file:///d:/Dev/repos/inkscape-mcp/examples/ui_icons.svg) | Clean Vector Icon Set | Grid-aligned UI icons (`icon_settings`, `icon_vector_pen`, `icon_trace`, `icon_qr_code`) with simplified paths | `path_simplify`, `optimize_svg`, `scour_svg` |
-| [`layered_illustration.svg`](file:///d:/Dev/repos/inkscape-mcp/examples/layered_illustration.svg) | Multi-Layer Landscape Art | 4-layer Z-stack (`Background Sky`, `Far Mountains`, `Midground Hills`, `Foreground Silhouette`) | `object_raise`, `object_lower`, `layers_to_files`, `render_preview` |
+The [live demo preview](../docs/images/live-demo.png) was exported by Inkscape.
+The remaining files are illustrative fixtures; labels in their artwork are not
+test results or compatibility guarantees.
 
----
+## Render a file
 
-## Quick Testing Commands
+From the repository root, with the native Inkscape executable installed:
 
-### 1. Render High-DPI Preview PNG
 ```bash
-uv run inkscape-mcp --mode stdio
-# Tool: inkscape_vector
-# Params: operation="render_preview", input_path="examples/logo_badge.svg", output_path="badge_preview.png", dpi=300
+inkscape examples/logo_badge.svg --export-type=png --export-filename=/tmp/inkscape-logo-badge.png
 ```
 
-### 2. Export Layers to Separate Vector Files
-```bash
-# Tool: inkscape_vector
-# Params: operation="layers_to_files", input_path="examples/layered_illustration.svg", output_dir="output_layers"
+Through MCP, send this to `inkscape_render`, replacing both paths with absolute
+paths accessible to the server:
+
+```json
+{
+  "operation": "export_preview",
+  "input_path": "/absolute/path/to/inkscape-mcp/examples/logo_badge.svg",
+  "output_path": "/absolute/path/to/badge-preview.png",
+  "dpi": 144
+}
 ```
 
-### 3. Convert Text Elements to Paths
-```bash
-# Tool: inkscape_vector
-# Params: operation="text_to_path", input_path="examples/logo_badge.svg", output_path="logo_badge_paths.svg"
+## Inspect objects
+
+Send this to `inkscape_analysis`:
+
+```json
+{
+  "operation": "objects",
+  "input_path": "/absolute/path/to/inkscape-mcp/examples/technical_diagram.svg"
+}
 ```
 
-### 4. Export CAD DXF File
-```bash
-# Tool: inkscape_vector
-# Params: operation="export_dxf", input_path="examples/laser_cut_template.svg", output_path="laser_template.dxf"
-```
+Use returned IDs for subsequent object-specific operations. For a PDF, call
+`inkscape_file` with `operation: "convert"`, source and destination paths, and
+`format: "pdf"`.
 
-### 5. Automated Gallery Generation
-Run the included build tool to generate PNG thumbnails and update the interactive gallery:
-```bash
-uv run python scripts/build/generate_example_gallery.py
-```
+For live drawing, saving, and separate managed windows, follow
+[Usage](../docs/USAGE.md). Reproduce the two-document acceptance workflow with
+[the desktop smoke script](../scripts/desktop_smoke.py), as described in
+[Development](../docs/DEVELOPMENT.md#tests).

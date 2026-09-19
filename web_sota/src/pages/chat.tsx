@@ -342,16 +342,7 @@ export function Chat() {
       setStreaming(false);
       setAbort(null);
     }
-  }, [
-    input,
-    streaming,
-    messages,
-    provider,
-    model,
-    endpoint,
-    personality,
-    persona,
-  ]);
+  }, [input, streaming, messages, provider, model, endpoint, persona]);
 
   const stop = () => {
     abort?.abort();

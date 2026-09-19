@@ -6,16 +6,15 @@ import argparse
 import asyncio
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 from inkscape_mcp.utils.fleet_e2e_offline import run_offline_smoke
-from inkscape_mcp.utils.fleet_http import (
-    DEFAULT_GIMP_URL,
-    DEFAULT_INKSCAPE_URL,
-    DEFAULT_ROBOTICS_URL,
-    call_http_tool,
-    check_http_health,
-)
+from inkscape_mcp.utils.fleet_http import DEFAULT_GIMP_URL
+from inkscape_mcp.utils.fleet_http import DEFAULT_INKSCAPE_URL
+from inkscape_mcp.utils.fleet_http import DEFAULT_ROBOTICS_URL
+from inkscape_mcp.utils.fleet_http import call_http_tool
+from inkscape_mcp.utils.fleet_http import check_http_health
 
 
 async def _probe(name: str, url: str) -> dict[str, object]:
@@ -35,7 +34,7 @@ async def run_e2e_smoke(
     offline_work_dir: Path | None = None,
 ) -> dict[str, object]:
     if offline:
-        work = offline_work_dir or Path("D:/Temp/fleet_pipeline/inkscape_e2e_offline")
+        work = offline_work_dir or Path(tempfile.mkdtemp(prefix="inkscape-e2e-offline-"))
         return await run_offline_smoke(work_dir=work)
 
     steps: list[dict[str, object]] = []
@@ -53,9 +52,21 @@ async def run_e2e_smoke(
             "inkscape_fab_art",
             {"operation": "list_presets"},
         )
-        steps.append({"name": "inkscape_fab_presets", "success": bool(presets.get("success")), "detail": presets})
+        steps.append(
+            {
+                "name": "inkscape_fab_presets",
+                "success": bool(presets.get("success")),
+                "detail": presets,
+            }
+        )
     else:
-        steps.append({"name": "inkscape_fab_presets", "success": False, "detail": {"skipped": "inkscape offline"}})
+        steps.append(
+            {
+                "name": "inkscape_fab_presets",
+                "success": False,
+                "detail": {"skipped": "inkscape offline"},
+            }
+        )
 
     gimp_online = next(p for p in probes if p["service"] == "gimp-mcp")["online"]
     if gimp_online and svg_path and Path(svg_path).is_file():
@@ -68,9 +79,17 @@ async def run_e2e_smoke(
                 "target_platform": "gazebo",
             },
         )
-        steps.append({"name": "inkscape_to_gimp", "success": bool(raster.get("success")), "detail": raster})
+        steps.append(
+            {"name": "inkscape_to_gimp", "success": bool(raster.get("success")), "detail": raster}
+        )
     elif svg_path:
-        steps.append({"name": "inkscape_to_gimp", "success": False, "detail": {"skipped": "services offline"}})
+        steps.append(
+            {
+                "name": "inkscape_to_gimp",
+                "success": False,
+                "detail": {"skipped": "services offline"},
+            }
+        )
 
     robotics_online = next(p for p in probes if p["service"] == "robotics-mcp")["online"]
     if robotics_online:
@@ -91,9 +110,17 @@ async def run_e2e_smoke(
                     },
                 )
         except Exception as exc:
-            steps.append({"name": "robotics_fab_bridge", "success": False, "detail": {"error": str(exc)}})
+            steps.append(
+                {"name": "robotics_fab_bridge", "success": False, "detail": {"error": str(exc)}}
+            )
     else:
-        steps.append({"name": "robotics_fab_bridge", "success": False, "detail": {"skipped": "robotics offline"}})
+        steps.append(
+            {
+                "name": "robotics_fab_bridge",
+                "success": False,
+                "detail": {"skipped": "robotics offline"},
+            }
+        )
 
     if input_dir and Path(input_dir).is_dir() and inkscape_online:
         batch = await call_http_tool(
@@ -104,7 +131,9 @@ async def run_e2e_smoke(
                 "input_dir": input_dir,
             },
         )
-        steps.append({"name": "fab_dxf_batch", "success": bool(batch.get("success")), "detail": batch})
+        steps.append(
+            {"name": "fab_dxf_batch", "success": bool(batch.get("success")), "detail": batch}
+        )
 
     success = all(bool(s.get("success")) for s in steps if s.get("name") != "fleet_probe")
     return {"success": success, "mode": "http", "steps": steps}

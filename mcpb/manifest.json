@@ -2,66 +2,107 @@
   "manifest_version": "0.2",
   "name": "inkscape-mcp",
   "version": "2.6.0",
-  "description": "MCP server for Inkscape-backed SVG and vector operations (FastMCP 3.2.0+)",
-  "author": { "name": "sandraschi" },
+  "description": "Inkscape SVG, vector and live document workflows over MCP (FastMCP 3.4+)",
+  "author": {
+    "name": "Sandra Schipal"
+  },
   "server": {
     "type": "python",
     "entry_point": "run_server.py",
     "mcp_config": {
       "command": "uv",
-      "args": ["run","--directory","${PWD}","run_server.py"],
+      "args": [
+        "run",
+        "--frozen",
+        "--no-dev",
+        "--directory",
+        "${__dirname}",
+        "run_server.py",
+        "--mode",
+        "stdio"
+      ],
       "env": {
-        "PYTHONPATH": "${PWD}/src",
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONPATH": "${__dirname}/src",
+        "PYTHONUNBUFFERED": "1",
+        "MCP_TRANSPORT": "stdio"
       }
     }
   },
   "tools": [
-    { "name": "generate_svg", "description": "generate_svg" },
-    { "name": "agentic_inkscape_workflow", "description": "agentic_inkscape_workflow" },
-    { "name": "intelligent_vector_processing", "description": "intelligent_vector_processing" },
-    { "name": "conversational_inkscape_assistant", "description": "conversational_inkscape_assistant" },
-    { "name": "api_logs", "description": "api_logs" },
-    { "name": "api_logs_clear", "description": "api_logs_clear" },
-    { "name": "api_help", "description": "api_help" },
-    { "name": "api_docs", "description": "api_docs" },
-    { "name": "llm_providers", "description": "llm_providers" },
-    { "name": "health", "description": "health" },
-    { "name": "diagnostics", "description": "diagnostics" },
-    { "name": "system_info", "description": "system_info" },
-    { "name": "generate_svg_endpoint", "description": "generate_svg_endpoint" },
-    { "name": "api_v1_tool", "description": "api_v1_tool" },
-    { "name": "list_skills", "description": "list_skills" },
-    { "name": "get_skill", "description": "get_skill" },
-    { "name": "fleet_overview", "description": "fleet_overview" },
-    { "name": "capabilities", "description": "capabilities" },
-    { "name": "main_stdio", "description": "main(stdio)" },
-    { "name": "main_http", "description": "main(http)" },
-    { "name": "main_sse", "description": "main(sse)" },
-    { "name": "list_local_models", "description": "list_local_models" },
-    { "name": "inkscape_analysis_quality", "description": "inkscape_analysis(quality)" },
-    { "name": "inkscape_analysis_statistics", "description": "inkscape_analysis(statistics)" },
-    { "name": "inkscape_analysis_validate", "description": "inkscape_analysis(validate)" },
-    { "name": "inkscape_analysis_objects", "description": "inkscape_analysis(objects)" },
-    { "name": "inkscape_analysis_dimensions", "description": "inkscape_analysis(dimensions)" },
-    { "name": "inkscape_analysis_structure", "description": "inkscape_analysis(structure)" },
-    { "name": "inkscape_file_load", "description": "inkscape_file(load)" },
-    { "name": "inkscape_file_save", "description": "inkscape_file(save)" },
-    { "name": "inkscape_file_convert", "description": "inkscape_file(convert)" },
-    { "name": "inkscape_file_info", "description": "inkscape_file(info)" },
-    { "name": "inkscape_file_validate", "description": "inkscape_file(validate)" },
-    { "name": "inkscape_file_list_formats", "description": "inkscape_file(list_formats)" },
-    { "name": "generate_heraldry", "description": "generate_heraldry" },
-    { "name": "generate_heraldry_trumponia_trumponia", "description": "generate_heraldry_trumponia(trumponia)" },
-    { "name": "generate_heraldry_trumponia_custom", "description": "generate_heraldry_trumponia(custom)" },
-    { "name": "_parse_svg_xml_list", "description": "_parse_svg_xml(list)" },
-    { "name": "_parse_svg_xml_get", "description": "_parse_svg_xml(get)" },
-    { "name": "_parse_svg_xml_create", "description": "_parse_svg_xml(create)" },
-    { "name": "_parse_svg_xml_rename", "description": "_parse_svg_xml(rename)" },
-    { "name": "_parse_svg_xml_hide", "description": "_parse_svg_xml(hide)" },
-    { "name": "_parse_svg_xml_show", "description": "_parse_svg_xml(show)" },
-    { "name": "_parse_svg_xml_reorder", "description": "_parse_svg_xml(reorder)" },
-    { "name": "_parse_svg_xml_lock", "description": "_parse_svg_xml(lock)" },
-    { "name": "_parse_svg_xml_unlock", "description": "_parse_svg_xml(unlock)" }
-  ]
+    {
+      "name": "inkscape_file",
+      "description": "File validation, metadata, saving, format conversion"
+    },
+    {
+      "name": "inkscape_vector",
+      "description": "SVG construction, path editing, queries, previews"
+    },
+    {
+      "name": "inkscape_analysis",
+      "description": "Document statistics and structural inspection"
+    },
+    {
+      "name": "inkscape_render",
+      "description": "PNG previews and multi-DPI exports"
+    },
+    {
+      "name": "inkscape_validation",
+      "description": "SVG quality and size checks"
+    },
+    {
+      "name": "inkscape_system",
+      "description": "Runtime status, installed actions, live desktop operations"
+    },
+    {
+      "name": "inkscape_fleet",
+      "description": "Handoffs to other graphics applications"
+    },
+    {
+      "name": "inkscape_fab_art",
+      "description": "Fabrication and robotics asset workflows"
+    },
+    {
+      "name": "inkscape_sim_art",
+      "description": "Icon packs, sheets, simulation/VR asset staging"
+    },
+    {
+      "name": "list_local_models",
+      "description": "Local model discovery"
+    },
+    {
+      "name": "llm_ops",
+      "description": "Local model engine management"
+    },
+    {
+      "name": "generate_heraldry",
+      "description": "Preset heraldic SVG"
+    },
+    {
+      "name": "generate_svg",
+      "description": "SVG generation using client sampling"
+    },
+    {
+      "name": "agentic_inkscape_workflow",
+      "description": "Sampling-assisted workflow planning"
+    },
+    {
+      "name": "intelligent_vector_processing",
+      "description": "Sampling-assisted processing plans"
+    },
+    {
+      "name": "conversational_inkscape_assistant",
+      "description": "Sampling-assisted vector graphics guidance"
+    }
+  ],
+  "homepage": "https://github.com/GianluDeveloper/inkscape-mcp",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GianluDeveloper/inkscape-mcp"
+  },
+  "compatibility": {
+    "runtimes": {
+      "python": ">=3.12"
+    }
+  }
 }

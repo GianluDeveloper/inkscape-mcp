@@ -1,8 +1,8 @@
 {
   "manifest_version": "0.2",
   "name": "inkscape-mcp",
-  "version": "2.0.0b0",
-  "description": "MCP server for Inkscape CLI-backed SVG and vector workflows (FastMCP 3.1+). Portmanteau tools: file, vector, analysis, system; optional sampling/agentic tools when dependencies are installed.",
+  "version": "2.6.0",
+  "description": "Inkscape SVG, vector and live document workflows over MCP (FastMCP 3.4+)",
   "author": {
     "name": "Sandra Schipal"
   },
@@ -11,66 +11,94 @@
     "entry_point": "src/inkscape_mcp/main.py",
     "mcp_config": {
       "command": "python",
-      "args": ["-m", "inkscape_mcp.main"],
+      "args": [
+        "-m",
+        "inkscape_mcp.main",
+        "--mode",
+        "stdio"
+      ],
       "env": {
-        "PYTHONPATH": "${PWD}/src",
+        "PYTHONPATH": "${__dirname}/src",
         "PYTHONUNBUFFERED": "1",
-        "INKSCAPE_MCP_CONFIG_PATH": "${PWD}/config.yaml"
+        "MCP_TRANSPORT": "stdio"
       }
-    }
-  },
-  "user_config": {
-    "inkscape_path": {
-      "type": "string",
-      "title": "Inkscape Executable Path",
-      "description": "Path to the Inkscape executable on your system",
-      "required": false,
-      "default": "inkscape"
-    },
-    "process_timeout": {
-      "type": "string",
-      "title": "Operation Timeout (seconds)",
-      "description": "Maximum time in seconds for Inkscape operations to complete",
-      "default": "60"
-    },
-    "max_concurrent_processes": {
-      "type": "string",
-      "title": "Max Concurrent Operations",
-      "description": "Maximum number of concurrent Inkscape processes allowed",
-      "default": "4"
-    },
-    "allowed_directories": {
-      "type": "string",
-      "title": "Allowed Working Directories (comma-separated)",
-      "description": "Comma-separated list of directories where file operations are permitted",
-      "required": false,
-      "default": ""
     }
   },
   "tools": [
     {
       "name": "inkscape_file",
-      "description": "File operations: load, convert, info, validate, list_formats (save may be limited; check server)"
+      "description": "File validation, metadata, saving, format conversion"
     },
     {
       "name": "inkscape_vector",
-      "description": "Vector operations: trace_image, boolean, path_simplify, render_preview, QR/barcode, query/measure, etc."
+      "description": "SVG construction, path editing, queries, previews"
     },
     {
       "name": "inkscape_analysis",
-      "description": "Document analysis: statistics, validate, dimensions"
+      "description": "Document statistics and structural inspection"
+    },
+    {
+      "name": "inkscape_render",
+      "description": "PNG previews and multi-DPI exports"
+    },
+    {
+      "name": "inkscape_validation",
+      "description": "SVG quality and size checks"
     },
     {
       "name": "inkscape_system",
-      "description": "System: status, version, diagnostics, help, config, extensions"
+      "description": "Runtime status, installed actions, live desktop operations"
+    },
+    {
+      "name": "inkscape_fleet",
+      "description": "Handoffs to other graphics applications"
+    },
+    {
+      "name": "inkscape_fab_art",
+      "description": "Fabrication and robotics asset workflows"
+    },
+    {
+      "name": "inkscape_sim_art",
+      "description": "Icon packs, sheets, simulation/VR asset staging"
     },
     {
       "name": "list_local_models",
-      "description": "List local LLM endpoints (Ollama / LM Studio) when available"
+      "description": "Local model discovery"
+    },
+    {
+      "name": "llm_ops",
+      "description": "Local model engine management"
     },
     {
       "name": "generate_heraldry",
-      "description": "Heraldic SVG generation (e.g. trumponia); optional post-processing via other tools"
+      "description": "Preset heraldic SVG"
+    },
+    {
+      "name": "generate_svg",
+      "description": "SVG generation using client sampling"
+    },
+    {
+      "name": "agentic_inkscape_workflow",
+      "description": "Sampling-assisted workflow planning"
+    },
+    {
+      "name": "intelligent_vector_processing",
+      "description": "Sampling-assisted processing plans"
+    },
+    {
+      "name": "conversational_inkscape_assistant",
+      "description": "Sampling-assisted vector graphics guidance"
     }
-  ]
+  ],
+  "homepage": "https://github.com/GianluDeveloper/inkscape-mcp",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GianluDeveloper/inkscape-mcp"
+  },
+  "compatibility": {
+    "runtimes": {
+      "python": ">=3.12"
+    }
+  }
 }

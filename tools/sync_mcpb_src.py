@@ -37,6 +37,8 @@ def main() -> int:
         shutil.rmtree(dst_root)
     dst_root.mkdir(parents=True)
     shutil.copytree(src_pkg, dst_pkg, ignore=_ignore)
+    for filename in ("LICENSE", "NOTICE.md"):
+        shutil.copy2(repo / filename, repo / "mcp-server" / filename)
     print(f"Synced {src_pkg} -> {dst_pkg}")
     return 0
 

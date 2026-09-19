@@ -1,159 +1,69 @@
-# Inkscape MCP Extensions
+# Native Inkscape extensions
 
-This directory contains Inkscape extensions that extend the functionality of the Inkscape MCP server. Extensions are Python scripts that use the `inkex` library to manipulate SVG documents and can be executed via the MCP protocol.
+This directory packages the native live-edit effect and four older experimental
+extensions. Each extension pairs an `.inx` descriptor with an `inkex` Python
+script. Public MCP operations are defined by the server's registered tool schema.
 
-## Extension Structure
+## Live SVG insertion
 
-An Inkscape extension consists of two files:
+[`mcp_edit_xml.py`](mcp_edit_xml.py) and [its descriptor](mcp_edit_xml.inx)
+implement the effect used by `inkscape_system` operations `insert_svg` and
+`draw_test`. It appends editable SVG to an addressed live document, preserving
+Inkscape's native undo history. The server verifies the inserted objects by
+reading the live document back.
 
-1. **`.inx` file**: XML configuration file that describes the extension to Inkscape
-2. **`.py` file**: Python script that implements the extension logic using the `inkex` library
+Install it through this explicit MCP call:
 
-### Basic Extension Example
-
-**extension_example.py**:
-```python
-import inkex
-from inkex import PathElement, Style
-
-
-class ExampleExtension(inkex.EffectExtension):
-    """Example extension that demonstrates basic functionality."""
-
-    def add_arguments(self, pars):
-        pars.add_argument("--param1", type=str, help="A string parameter")
-        pars.add_argument("--param2", type=int, default=42, help="An integer parameter")
-
-    def effect(self):
-        """Main extension logic."""
-        param1 = self.options.param1
-        param2 = self.options.param2
-
-        # Extension logic goes here
-        for elem in self.svg.selection:
-            if isinstance(elem, PathElement):
-                # Modify the selected path
-                elem.style["stroke"] = "red"
-                elem.style["stroke-width"] = str(param2)
-
-
-if __name__ == "__main__":
-    ExampleExtension().run()
+```json
+{"operation": "install_live_extension"}
 ```
 
-**extension_example.inx**:
-```xml
-<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
-    <name>Example Extension</name>
-    <id>org.inkscape.example</id>
-    <param name="param1" type="string" gui-text="String Parameter">example</param>
-    <param name="param2" type="int" min="1" max="100" gui-text="Integer Parameter">42</param>
-    <effect>
-        <object-type>all</object-type>
-        <effects-menu>
-            <submenu>Project AG</submenu>
-        </effects-menu>
-    </effect>
-    <script>
-        <command location="inx" interpreter="python">extension_example.py</command>
-    </script>
-</inkscape-extension>
+Restart existing Inkscape windows after installation or an extension update.
+New managed instances launched afterward load the installed effect. The default
+Linux destination is
+`~/.config/inkscape/extensions/inkscape_mcp_live/`; `XDG_CONFIG_HOME` or
+`INKSCAPE_PROFILE_DIR` can select another profile.
+
+The bridge uses the current user's D-Bus session and a correlated, locked request
+exchange. An insertion accepts at most 10 MiB, rejects conflicting element IDs,
+and runs once. An uncertain result requires inspecting the document before
+retrying. Ordinary server startup does not install the effect.
+
+See [live setup](../../../INSTALL.md#enable-live-drawing),
+[managed document examples](../../../docs/USAGE.md), and
+[the live bridge implementation](../utils/live_extension.py).
+
+## Other bundled scripts
+
+These legacy extension sources are retained for development. They are not
+installed by `install_live_extension` or automatically registered as MCP tools.
+
+| Files | Current scope |
+| --- | --- |
+| `ag_batch_trace.py/.inx` | Experimental batch conversion; its color parameter is unused and it does not establish a reliable bitmap-tracing contract |
+| `ag_color_quantize.py/.inx` | Maps path fill/stroke colors to a supplied or basic palette; dithering is not implemented |
+| `ag_layer_animation.py/.inx` | Generates CSS from layers; requires a compatible SVG viewer for animation |
+| `ag_unity_prep.py/.inx` | Experimental group, viewBox, and metadata transforms; visual preservation needs independent verification |
+
+`extension_manager.py` is a legacy internal helper. Its presence does not imply
+a general extension execution API. `inkscape_system(operation="list_extensions")`
+reports installed descriptors; inspect the actual tool schema before attempting
+an operation.
+
+## Development and attribution
+
+Validate the live bridge with the focused tests from the repository root:
+
+```bash
+uv run pytest tests/unit/test_live_extension.py tests/unit/test_live_system.py --no-cov -q
 ```
 
-## Extension Lifecycle
+The explicit desktop acceptance procedure is in
+[Development](../../../docs/DEVELOPMENT.md#tests). It creates and edits managed
+test documents.
 
-1. **Discovery**: The MCP server scans the extensions directory for `.inx` files
-2. **Parsing**: Extension metadata and parameters are extracted from `.inx` files
-3. **Registration**: Extensions are registered as MCP tools with appropriate parameter schemas
-4. **Execution**: Extensions are executed via Inkscape CLI with `--extension` parameter
-
-## Extension Types
-
-### Built-in Extensions
-Inkscape comes with many built-in extensions for:
-- **Export/Import**: Various formats (PDF, PNG, DXF, etc.)
-- **Render**: Barcode generation, gear creation
-- **Text**: Hershey text, lorem ipsum generation
-- **Modify**: Path operations, color adjustments
-
-### Custom Extensions
-Extensions can be created for specific workflows like:
-- **Unity Optimization**: Prepare SVGs for Unity UI import
-- **Batch Processing**: Process multiple files automatically
-- **Animation**: Create CSS-animated SVGs from layers
-- **VRChat Preparation**: Optimize assets for VR environments
-
-## MCP Integration
-
-Extensions are exposed through MCP tools that:
-1. Accept extension parameters as tool arguments
-2. Execute extensions via Inkscape CLI
-3. Return results and status information
-4. Handle both GUI and headless execution modes
-
-## Best Practices
-
-### Error Handling
-- Always wrap extension logic in try/except blocks
-- Provide meaningful error messages
-- Log execution details for debugging
-
-### Parameter Design
-- Use descriptive parameter names
-- Provide sensible defaults
-- Validate parameter values
-- Support both required and optional parameters
-
-### Performance
-- Process selections efficiently
-- Avoid unnecessary DOM traversals
-- Use appropriate data structures
-- Consider memory usage for large documents
-
-## Available Extensions
-
-### Batch Processing
-- **AG Batch Trace**: Convert bitmaps to vectors with quantization
-- **AG Unity Prep**: Optimize SVGs for Unity import
-- **AG Color Quantize**: Reduce color palettes for performance
-
-### Animation
-- **AG Layer Animation**: Create CSS-animated SVGs from layers
-- **AG SMIL Animation**: Add SMIL animations to elements
-
-### Optimization
-- **AG Path Simplify**: Reduce path complexity
-- **AG SVG Clean**: Remove metadata and optimize structure
-- **AG Coordinate Reset**: Reset document coordinates
-
-## Configuration
-
-Extensions can be configured in the main `config.yaml`:
-
-```yaml
-extensions:
-  enabled: true
-  directories:
-    - "~/.config/inkscape/extensions"
-    - "./extensions"
-  disabled:
-    - "some_extension"
-  config:
-    ag_batch_trace:
-      default_colors: 4
-      simplify_paths: true
-```
-
-## Testing Extensions
-
-1. Place extension files in the extensions directory
-2. Restart the Inkscape MCP server
-3. Check server logs for extension loading
-4. Test via MCP tools with appropriate parameters
-
-## Troubleshooting
-
-- **Extension not loading**: Check `.inx` file syntax and Python imports
-- **Parameters not working**: Verify parameter definitions in `.inx` file
-- **Execution errors**: Check Inkscape version compatibility and CLI output
-- **Permission issues**: Ensure proper file permissions on extension files
+The native effect is adapted from
+[Aravind EV's inkscape_mcp](https://github.com/aravindev/inkscape_mcp), with its
+MIT notice retained in the source and [NOTICE.md](../../../NOTICE.md).
+See [upstream integration notes](../../../docs/UPSTREAM_INTEGRATION.md) for the
+relationship to that project and the Sandra Schipal base repository.

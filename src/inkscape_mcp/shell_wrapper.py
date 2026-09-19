@@ -29,7 +29,9 @@ _ACTION_ERROR = re.compile(
     r"unknown export type|no export type specified|"
     r"failed to (?:load|open|save|export)|(?:^|\s)error:|"
     r"cannot be opened|failed to create document|tracing failed|"
-    r"did not find object with id|emergency save activated|segmentation fault)"
+    r"did not find object with id|"
+    r"action:[^\n]*(?:selection empty|expected argument|parsing arguments failed)|"
+    r"emergency save activated|segmentation fault)"
 )
 
 
@@ -186,6 +188,10 @@ class ShellModeWrapper:
                     )
                     if _ACTION_ERROR.search(diagnostics):
                         raise ShellModeError("Inkscape reported an action error")
+                    if self._proc.returncode is not None:
+                        raise ShellModeError(
+                            f"Inkscape shell exited with return code {self._proc.returncode}"
+                        )
             except asyncio.CancelledError:
                 await self._stop(graceful=False)
                 raise

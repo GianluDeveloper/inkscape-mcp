@@ -1,11 +1,39 @@
-
-## [Unreleased] — 2026-07-14
 # Changelog
 
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Verified, undoable insertion of SVG shapes and editable text into a live Linux
+  desktop through a bundled native inkex extension.
+- Managed document sessions with stable IDs, separate Inkscape application
+  instances, inspection, native saving, atomic copies, and guarded closing.
+- Searchable action discovery from the installed Inkscape executable.
+- A reproducible two-window acceptance script using the actual stdio MCP protocol.
+- Ubuntu 26.04 installation instructions, upstream integration notes, and credits
+  to Aravind EV and Sandra Schipal.
+
+### Fixed
+
+- CLI and shell failures, timeouts, cancellation cleanup, and malformed actions.
+- Transport selection, portable entry points, and per-server tool configuration.
+- Correlation of extension results when GTK delays its D-Bus acknowledgement.
+- Linked image paths when saving a live document into another directory.
+
+### Changed
+
+- Replaced inherited CI placeholders with Python, native Inkscape, packaging,
+  and frontend checks; documented the actual supported tool surface.
+- Removed backup files, generated source mirrors, duplicate dependency locks,
+  obsolete plans, and upstream-specific publication configuration.
+
+The entries below are inherited upstream history and do not assert that this
+fork has published those releases or packages.
 
 ## [1.3.0] - 2026-01-19 - AI SVG Generation System
 
@@ -517,4 +545,3 @@ This release transforms Inkscape-MCP into a comprehensive "vibe architect" workf
 - 🔄 In development
 - 📋 Planned for future release
 - 🎯 Key achievement/milestone
-

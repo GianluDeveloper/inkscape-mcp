@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Image as ImageIcon,
   Loader2,
+  type LucideIcon,
   QrCode,
   Sliders,
   Zap,
@@ -18,9 +19,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+interface ActionResult {
+  success?: boolean;
+  summary?: string;
+  message?: string;
+  error?: string;
+}
+
 interface ActionStatus {
   loading: boolean;
-  result: any | null;
+  result: ActionResult | null;
   error: string | null;
 }
 
@@ -31,13 +39,17 @@ export function Actions() {
     qr: { loading: false, result: null, error: null },
   });
 
-  const runAction = async (id: string, operation: string, args: any = {}) => {
+  const runAction = async (
+    id: string,
+    operation: string,
+    args: Record<string, unknown> = {},
+  ) => {
     setStatus((prev) => ({
       ...prev,
       [id]: { loading: true, result: null, error: null },
     }));
     try {
-      const res = await callTool("inkscape_vector", {
+      const res = await callTool<ActionResult>("inkscape_vector", {
         operation,
         ...args,
       });
@@ -52,12 +64,16 @@ export function Actions() {
       }
       setStatus((prev) => ({
         ...prev,
-        [id]: { loading: false, result: res.data, error: null },
+        [id]: { loading: false, result: res.data ?? {}, error: null },
       }));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setStatus((prev) => ({
         ...prev,
-        [id]: { loading: false, result: null, error: error.message },
+        [id]: {
+          loading: false,
+          result: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
       }));
     }
   };
@@ -118,7 +134,21 @@ export function Actions() {
   );
 }
 
-function ActionCard({ title, description, icon: Icon, status, onRun }: any) {
+interface ActionCardProps {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  status: ActionStatus;
+  onRun: () => void;
+}
+
+function ActionCard({
+  title,
+  description,
+  icon: Icon,
+  status,
+  onRun,
+}: ActionCardProps) {
   return (
     <Card className="border-slate-800 bg-slate-950/50">
       <CardHeader>
