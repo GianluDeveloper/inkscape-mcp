@@ -260,6 +260,9 @@ class InkscapeMCPServer:
             operation: InkscapeVectorOperation,
             input_path: str = "",
             output_path: str = "",
+            svg_content: str = "",
+            params: dict[str, Any] | None = None,
+            element_type: str = "",
         ) -> dict[str, Any]:
             """INKSCAPE_VECTOR - Vector editing, booleans, trace, QR/barcode, path ops, previews.
 
@@ -273,6 +276,9 @@ class InkscapeMCPServer:
                 operation: Subcommand; must match InkscapeVectorOperation.
                 input_path: Primary document path (some ops may use output-only paths in kwargs).
                 output_path: Output file when the operation writes a file.
+                svg_content: Complete SVG XML for construct_svg; no sampling is required.
+                params: For construct_svg, optional header/body/footer instead of svg_content.
+                element_type: Optional descriptive label for construct_svg.
 
             Returns:
                 Dict with success, message, data or structured results, execution_time_ms, error.
@@ -285,6 +291,9 @@ class InkscapeMCPServer:
                 operation=operation,
                 input_path=input_path,
                 output_path=output_path,
+                svg_content=svg_content,
+                params=params,
+                element_type=element_type,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )
@@ -556,21 +565,24 @@ class InkscapeMCPServer:
         @self.mcp.tool(
             annotations=ToolAnnotations(
                 readOnlyHint=False,
-                destructiveHint=False,
-                idempotentHint=True,
+                destructiveHint=True,
+                idempotentHint=False,
                 openWorldHint=False,
             ),
         )
-        async def inkscape_system(operation: InkscapeSystemOperation) -> dict[str, Any]:
+        async def inkscape_system(operation: InkscapeSystemOperation, action: str = "") -> dict[str, Any]:
             """INKSCAPE_SYSTEM - Server/Inkscape status, help, diagnostics, version, extensions.
 
             PORTMANTEAU RATIONALE: Operational and introspection calls stay in one discoverable tool.
 
-            Operations: status, execution_mode, help, diagnostics, version, config, list_extensions, execute_extension, self_terminate.
+            Operations: status, execution_mode, hands_in_command, help, diagnostics, version,
+            config, list_extensions, execute_extension, self_terminate.
 
             Args:
                 operation: System subcommand (Literal). Extension execution may require extra
                     parameters not exposed on this MCP wrapper - prefer list_extensions first.
+                action: Semicolon-separated Inkscape actions for hands_in_command. Requires
+                    a running Inkscape GUI and access to its desktop session.
 
             Returns:
                 Dict with success, message, data, execution_time_ms, error.
@@ -580,6 +592,7 @@ class InkscapeMCPServer:
             """
             return await inkscape_system_tool(
                 operation=operation,
+                action=action,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )

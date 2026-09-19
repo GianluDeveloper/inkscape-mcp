@@ -3,6 +3,7 @@ Unit tests for Inkscape CLI wrapper module.
 """
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
@@ -94,19 +95,63 @@ class TestInkscapeCliWrapper:
         mock_cli_wrapper._execute_command.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execute_actions_with_export(self, mock_cli_wrapper):
-        """Test actions execution appends export-do when output_path is given."""
+    @pytest.mark.parametrize(
+        "actions",
+        [
+            ["select-all", "object-to-path"],
+            ["select-all", "object-to-path", "export-do"],
+            ["select-all;object-to-path;export-do"],
+        ],
+    )
+    async def test_execute_actions_with_export(self, mock_cli_wrapper, actions):
+        """Export actions stay separate from the filename and run exactly once."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
+        original_actions = actions.copy()
+        output_path = "output image.svg"
 
         await mock_cli_wrapper.execute_actions(
             input_path="test.svg",
-            actions=["select-all", "object-to-path"],
-            output_path="output.svg",
+            actions=actions,
+            output_path=output_path,
         )
 
         cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
-        assert any("--export-filename=" in arg for arg in cmd_args)
-        assert any(arg.endswith(";export-do") for arg in cmd_args)
+        assert f"--export-filename={Path(output_path).resolve()}" in cmd_args
+        assert "--actions=select-all;object-to-path;export-do" in cmd_args
+        assert "--no-remote-resources" not in cmd_args
+        assert actions == original_actions
+
+    @pytest.mark.asyncio
+    async def test_execute_verbs_omits_unsupported_option(self, mock_cli_wrapper):
+        """Legacy verb commands must not include the unsupported remote-resource flag."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="")
+
+        await mock_cli_wrapper.execute_verbs("test.svg", ["EditSelectAll"])
+
+        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
+        assert "--batch-process" in cmd_args
+        assert "--verb" in cmd_args
+        assert "--no-remote-resources" not in cmd_args
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["execute_actions", "execute_verbs"])
+    async def test_batch_commands_use_distinct_application_ids(self, mock_cli_wrapper, method):
+        """Concurrent batch jobs must not be forwarded to each other or the open GUI."""
+        mock_cli_wrapper._execute_command = AsyncMock(return_value="")
+
+        await asyncio.gather(
+            *(getattr(mock_cli_wrapper, method)("test.svg", ["select-all"]) for _ in range(3))
+        )
+
+        application_ids = []
+        for call in mock_cli_wrapper._execute_command.call_args_list:
+            command = call.args[0]
+            assert "--batch-process" in command
+            tags = [arg for arg in command if arg.startswith("--app-id-tag=")]
+            assert len(tags) == 1
+            assert tags[0].startswith("--app-id-tag=inkscape-mcp-")
+            application_ids.append(tags[0])
+        assert len(set(application_ids)) == 3
 
     @pytest.mark.asyncio
     async def test_export_file_success(self, mock_cli_wrapper, temp_file):

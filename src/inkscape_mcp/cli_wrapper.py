@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -179,11 +180,12 @@ class InkscapeCliWrapper:
         """
         timeout = timeout or self.config.process_timeout
 
-        # Build command arguments with HEADLESS MODE (prevents GUI flashes)
-        cmd_args = [self.config.inkscape_executable, "--batch-process"]
-
-        # Prevent hanging on missing external resources
-        cmd_args.append("--no-remote-resources")
+        # Isolate batch commands from the GUI and concurrent MCP requests.
+        cmd_args = [
+            self.config.inkscape_executable,
+            f"--app-id-tag=inkscape-mcp-{uuid4().hex}",
+            "--batch-process",
+        ]
 
         # Add verbs
         for verb in verbs:
@@ -223,16 +225,19 @@ class InkscapeCliWrapper:
         """
         timeout = timeout or self.config.process_timeout
 
-        cmd_args = [self.config.inkscape_executable]
+        # --batch-process alone can forward actions to an existing GUI and return
+        # success without exporting. A unique application ID keeps each job local.
+        cmd_args = [
+            self.config.inkscape_executable,
+            f"--app-id-tag=inkscape-mcp-{uuid4().hex}",
+            "--batch-process",
+        ]
 
-        # Use --batch-process for headless operation (prevents GUI flashes)
-        cmd_args.append("--batch-process")
-
-        # Prevent hanging on missing external resources
-        cmd_args.append("--no-remote-resources")
-
-        # Construct the actions string
-        actions_str = ";".join(actions)
+        # Keep export-do in the action chain without changing the caller's list.
+        actions_to_run = list(actions)
+        if output_path and "export-do" not in ";".join(actions_to_run).split(";"):
+            actions_to_run.append("export-do")
+        actions_str = ";".join(actions_to_run)
 
         # Add input file
         cmd_args.append(str(Path(input_path).resolve()))
@@ -240,12 +245,8 @@ class InkscapeCliWrapper:
         # Add the actions flag
         cmd_args.append(f"--actions={actions_str}")
 
-        # If an output path is specified, add an export action to the chain
         if output_path:
             cmd_args.append(f"--export-filename={str(Path(output_path).resolve())}")
-            # Ensure an export action is part of the chain if output_path is given
-            if "export-do" not in actions_str:
-                cmd_args[-1] += ";export-do"  # Append export-do if not already present
 
         return await self._execute_command(cmd_args, timeout)
 

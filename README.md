@@ -44,6 +44,34 @@ AI agents create, edit, layer, animate, and export SVG files using Inkscape. Wor
 
 > "Convert this text element to paths, then apply a roughen LPE with medium intensity."
 
+### Create an SVG without sampling
+
+Call `inkscape_vector` with `operation="construct_svg"`, an `output_path`, and
+`svg_content` containing the complete SVG XML. Alternatively, pass a `params`
+object with `body` and optional `header`/`footer` strings. For example:
+
+```json
+{
+  "operation": "construct_svg",
+  "output_path": "/home/ubuntu/Downloads/sun.svg",
+  "svg_content": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><circle cx=\"50\" cy=\"50\" r=\"30\" fill=\"gold\"/></svg>"
+}
+```
+
+The server validates the XML before writing. Missing content, invalid XML, an
+invalid output extension, and configured directory/size limits produce a structured
+error. `generate_svg` instead requires client support for MCP `sampling.tools`;
+its `Context` is injected by FastMCP and must not be supplied as a JSON argument.
+
+To open a saved file in a running Inkscape window, call `inkscape_system` with
+`operation="hands_in_command"` and
+`action="file-open:/absolute/path/sun.svg;window-open"`. On Linux, the MCP server
+must inherit the desktop session's `DISPLAY`/`WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`,
+`DBUS_SESSION_BUS_ADDRESS`, and `XAUTHORITY` variables as applicable.
+
+After updating the server code, restart or reconnect the MCP connection so the
+client reloads the tool schemas.
+
 ## Documentation
 
 | Doc | Contents |

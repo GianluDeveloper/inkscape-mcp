@@ -1,5 +1,6 @@
 """Phase 1 Agent Lab tool tests (inkscape_render + execution_mode)."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
@@ -16,8 +17,12 @@ class TestInkscapeRenderTool:
 
     @pytest.fixture
     def mock_wrapper(self):
+        async def write_preview(**kwargs):
+            Path(kwargs["output_path"]).write_bytes(b"PNG preview contents")
+            return "Export complete"
+
         wrapper = AsyncMock()
-        wrapper._execute_actions = AsyncMock(return_value=(0, "ok", ""))
+        wrapper._execute_actions = AsyncMock(side_effect=write_preview)
         wrapper._execute_command = AsyncMock(return_value="800.0")
         return wrapper
 
@@ -47,7 +52,35 @@ class TestInkscapeRenderTool:
         assert result["operation"] == "export_preview"
         assert result["data"]["dpi"] == 192
         assert result["data"]["agent_vision"] is True
+        assert output.stat().st_size > 0
+        assert result["execution_time_ms"] >= 0
         mock_wrapper._execute_actions.assert_called_once()
+        assert "export-type:png" in mock_wrapper._execute_actions.call_args.kwargs["actions"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("empty_output", [False, True])
+    async def test_export_preview_requires_output_file(
+        self, mock_wrapper, mock_config, sample_svg_file, tmp_path, empty_output
+    ):
+        output = tmp_path / "missing_or_empty.png"
+        if empty_output:
+            output.touch()
+        mock_wrapper._execute_actions.side_effect = None
+        mock_wrapper._execute_actions.return_value = "Failed to load document"
+
+        result = await inkscape_render(
+            operation="export_preview",
+            input_path=str(sample_svg_file),
+            output_path=str(output),
+            cli_wrapper=mock_wrapper,
+            config=mock_config,
+        )
+
+        assert result["success"] is False
+        assert "nonempty preview file" in result["message"]
+        assert "Failed to load document" in result["message"]
+        assert result["data"]["stdout"] == "Failed to load document"
+        assert result["execution_time_ms"] >= 0
 
     @pytest.mark.asyncio
     async def test_export_preview_missing_input(self, mock_wrapper, mock_config):

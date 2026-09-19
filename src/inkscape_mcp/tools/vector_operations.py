@@ -333,6 +333,7 @@ Errors:
 import math
 import re
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from typing import Literal
@@ -416,6 +417,7 @@ async def inkscape_vector(
     font_weight: str = "",
     fill: str = "",
     text_anchor: str = "",
+    svg_content: str = "",
 ) -> dict[str, Any]:
     """Inkscape vector operations portmanteau tool."""
     start_time = time.time()
@@ -523,7 +525,7 @@ async def inkscape_vector(
             return await _text_to_path(input_path, output_path, object_id, cli_wrapper, config)
 
         elif operation == "construct_svg":
-            return await _construct_svg(output_path, element_type, params or {}, config)
+            return await _construct_svg(output_path, element_type, params or {}, config, svg_content)
 
         elif operation == "path_inset_outset":
             return await _path_inset_outset(
@@ -1099,15 +1101,24 @@ async def _render_preview(
     input_path: str, output_path: str, dpi: int, cli_wrapper: Any, config: Any
 ) -> dict[str, Any]:
     """Render PNG preview of SVG."""
+    start_time = time.perf_counter()
+    cli_output = ""
     try:
-        actions = [f"export-filename:{output_path}", f"export-dpi:{dpi}", "export-do"]
+        actions = ["export-type:png", f"export-filename:{output_path}", f"export-dpi:{dpi}", "export-do"]
 
-        await cli_wrapper._execute_actions(
+        cli_output = await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
         )
+
+        preview_path = Path(output_path)
+        if not preview_path.is_file() or preview_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Inkscape did not create a nonempty preview file: {output_path}. "
+                f"CLI output: {cli_output or '(empty)'}"
+            )
 
         return VectorOperationResult(
             success=True,
@@ -1119,7 +1130,7 @@ async def _render_preview(
                 "dpi": dpi,
                 "format": "png",
             },
-            execution_time_ms=(time.time() - time.time()) * 1000,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
         ).model_dump()
 
     except Exception as e:
@@ -1127,8 +1138,8 @@ async def _render_preview(
             success=False,
             operation="render_preview",
             message=f"Preview rendering failed: {e}",
-            data={},
-            execution_time_ms=0,
+            data={"input_path": input_path, "output_path": output_path, "stdout": cli_output},
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error=str(e),
         ).model_dump()
 
@@ -1483,22 +1494,40 @@ async def _construct_svg(
     output_path: str,
     element_type: str,
     params: dict[str, Any],
-    _config: Any,
+    config: Any,
+    svg_content: str = "",
 ) -> dict[str, Any]:
-    """Construct a new SVG from raw element definitions (header + body)."""
+    """Write supplied SVG XML or header/body/footer after validating the document."""
     try:
-        header = params.get(
-            "header", '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">'
-        )
-        body = params.get("body", "")
-        footer = params.get("footer", "</svg>")
-        svg_content = f"{header}\n{body}\n{footer}"
-        Path(output_path).write_text(svg_content, encoding="utf-8")
+        if not output_path:
+            raise ValueError("output_path is required for construct_svg")
+        path = Path(output_path).expanduser().resolve()
+        if path.suffix.lower() != ".svg":
+            raise ValueError("output_path must have an .svg extension")
+        allowed = getattr(config, "allowed_directories", []) or []
+        if allowed and not any(path.is_relative_to(Path(p).expanduser().resolve()) for p in allowed):
+            raise ValueError("output_path is outside allowed_directories")
+        if not svg_content.strip():
+            body = params.get("body", "")
+            if not isinstance(body, str) or not body.strip():
+                raise ValueError("Provide svg_content or params.body for construct_svg")
+            header = params.get(
+                "header", '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">'
+            )
+            footer = params.get("footer", "</svg>")
+            svg_content = f"{header}\n{body}\n{footer}"
+        max_bytes = getattr(config, "max_file_size_mb", 100) * 1024 * 1024
+        if len(svg_content.encode("utf-8")) > max_bytes:
+            raise ValueError("SVG exceeds max_file_size_mb")
+        root = ET.fromstring(svg_content)
+        if root.tag not in ("svg", "{http://www.w3.org/2000/svg}svg"):
+            raise ValueError("Root element must be SVG")
+        path.write_text(svg_content, encoding="utf-8")
         return VectorOperationResult(
             success=True,
             operation="construct_svg",
             message=f"Constructed SVG document at {output_path}",
-            data={"element_type": element_type, "path": output_path},
+            data={"element_type": element_type, "path": str(path)},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
