@@ -60,6 +60,7 @@ InkscapeSystemOperation = Literal[
     "version",
     "config",
     "execution_mode",
+    "hands_in_command",
     "list_extensions",
     "execute_extension",
     "self_terminate",

@@ -1,5 +1,5 @@
 """
-Inkscape MCP Server — FastMCP 3.1+ portmanteau entry point.
+Inkscape MCP Server - FastMCP 3.1+ portmanteau entry point.
 
 Exposes MCP tools that shell out to the Inkscape CLI, optional heraldry and
 agentic (sampling) tools, REST `/api/*` when HTTP transport is used, and
@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -41,6 +42,7 @@ from .tools import inkscape_system as inkscape_system_tool
 from .tools import inkscape_validation as inkscape_validation_tool
 from .tools import inkscape_vector as inkscape_vector_tool
 from .tools import list_local_models as list_local_models_tool
+from .tools import llm_ops as llm_ops_tool
 from .tools.heraldry import register_heraldry_tools
 from .transport import run_server_async
 
@@ -211,7 +213,7 @@ class InkscapeMCPServer:
             output_path: str = "",
             format: str = "",
         ) -> dict[str, Any]:
-            """INKSCAPE_FILE — Load, convert, export, and validate SVG/other files via Inkscape CLI.
+            """INKSCAPE_FILE - Load, convert, export, and validate SVG/other files via Inkscape CLI.
 
             PORTMANTEAU RATIONALE: One tool keeps file I/O discoverable without dozens of
             single-purpose tools; `operation` selects the CLI behavior.
@@ -234,7 +236,7 @@ class InkscapeMCPServer:
                 Dict with success, operation, message, data, execution_time_ms, and error on failure.
 
             Errors:
-                Missing file, permission denied, Inkscape not found — check message/error; verify
+                Missing file, permission denied, Inkscape not found - check message/error; verify
                 allowed_directories and INKSCAPE_PATH.
             """
             return await inkscape_file_tool(
@@ -258,8 +260,17 @@ class InkscapeMCPServer:
             operation: InkscapeVectorOperation,
             input_path: str = "",
             output_path: str = "",
+            svg_content: str = "",
+            params: dict[str, Any] | None = None,
+            element_type: str = "",
+            object_id: str = "",
+            object_ids: list[str] | None = None,
+            select_all: bool = False,
+            operation_type: str = "",
+            threshold: float = 1.0,
+            dpi: int = 96,
         ) -> dict[str, Any]:
-            """INKSCAPE_VECTOR — Vector editing, booleans, trace, QR/barcode, path ops, previews.
+            """INKSCAPE_VECTOR - Vector editing, booleans, trace, QR/barcode, path ops, previews.
 
             PORTMANTEAU RATIONALE: Inkscape exposes many CLI actions; grouping avoids tool explosion.
 
@@ -271,18 +282,36 @@ class InkscapeMCPServer:
                 operation: Subcommand; must match InkscapeVectorOperation.
                 input_path: Primary document path (some ops may use output-only paths in kwargs).
                 output_path: Output file when the operation writes a file.
+                svg_content: Complete SVG XML for construct_svg; no sampling is required.
+                params: For construct_svg, optional header/body/footer instead of svg_content.
+                element_type: Optional descriptive label for construct_svg.
+                object_id: Object ID for queries or edits on a single object.
+                object_ids: Object IDs for a boolean operation.
+                select_all: Select all objects for a boolean operation.
+                operation_type: Boolean operation: union, difference, intersection, exclusion.
+                threshold: Simplification threshold; native Inkscape uses its configured value.
+                dpi: Raster preview resolution.
 
             Returns:
                 Dict with success, message, data or structured results, execution_time_ms, error.
 
             Errors:
-                Unsupported operation, CLI timeout, invalid paths — use inkscape_system(status)
+                Unsupported operation, CLI timeout, invalid paths - use inkscape_system(status)
                 and confirm Inkscape install.
             """
             return await inkscape_vector_tool(
                 operation=operation,
                 input_path=input_path,
                 output_path=output_path,
+                svg_content=svg_content,
+                params=params,
+                element_type=element_type,
+                object_id=object_id,
+                object_ids=object_ids,
+                select_all=select_all,
+                operation_type=operation_type,
+                threshold=threshold,
+                dpi=dpi,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )
@@ -298,7 +327,7 @@ class InkscapeMCPServer:
         async def inkscape_analysis(
             operation: InkscapeAnalysisOperation, input_path: str
         ) -> dict[str, Any]:
-            """INKSCAPE_ANALYSIS — Inspect SVG structure, stats, quality, and dimensions (read-only).
+            """INKSCAPE_ANALYSIS - Inspect SVG structure, stats, quality, and dimensions (read-only).
 
             PORTMANTEAU RATIONALE: Analysis calls are grouped so agents can validate before mutating.
 
@@ -312,7 +341,7 @@ class InkscapeMCPServer:
                 Dict with success, message, data (bounded per operation), execution_time_ms, error.
 
             Errors:
-                File not found or unreadable SVG — check path and permissions.
+                File not found or unreadable SVG - check path and permissions.
             """
             return await inkscape_analysis_tool(
                 operation=operation,
@@ -336,7 +365,7 @@ class InkscapeMCPServer:
             dpi: int = 96,
             dpi_list: str = "",
         ) -> dict[str, Any]:
-            """INKSCAPE_RENDER — Agent vision exports and document summaries (Phase 1).
+            """INKSCAPE_RENDER - Agent vision exports and document summaries (Phase 1).
 
             PORTMANTEAU RATIONALE: Vision-loop exports are grouped separately from vector editing.
 
@@ -356,7 +385,7 @@ class InkscapeMCPServer:
                 Dict with success, message, data, execution_time_ms, error.
 
             Errors:
-                Missing input_path, Inkscape CLI unavailable, invalid dpi_list — see message.
+                Missing input_path, Inkscape CLI unavailable, invalid dpi_list - see message.
             """
             return await inkscape_render_tool(
                 operation=operation,
@@ -382,7 +411,7 @@ class InkscapeMCPServer:
             max_file_size_mb: int = 10,
             max_dimension: float = 16384,
         ) -> dict[str, Any]:
-            """INKSCAPE_VALIDATION — SVG QA checks for Agent Lab and web export pipelines.
+            """INKSCAPE_VALIDATION - SVG QA checks for Agent Lab and web export pipelines.
 
             Operations: validate_svg, check_viewbox, check_stroke_fill, check_size_limits,
             audit_web_svg.
@@ -431,7 +460,7 @@ class InkscapeMCPServer:
             skip_unity: bool = False,
             target_platform: str = "unity",
         ) -> dict[str, Any]:
-            """INKSCAPE_FLEET — Cross-repo handoff (gimp QA, blender SVG, unity sprites).
+            """INKSCAPE_FLEET - Cross-repo handoff (gimp QA, blender SVG, unity sprites).
 
             Operations: push_gimp_raster, stage_blender_svg, push_unity_sprite,
             build_layer_atlas, run_pipeline, list_staging.
@@ -479,7 +508,7 @@ class InkscapeMCPServer:
             dpi: int = 0,
             push_gimp: bool = False,
         ) -> dict[str, Any]:
-            """INKSCAPE_FAB_ART — DXF/laser fab paths, Gazebo schematics, robotics staging.
+            """INKSCAPE_FAB_ART - DXF/laser fab paths, Gazebo schematics, robotics staging.
 
             Operations: list_presets, batch_dxf_export, batch_laser_dots, gazebo_schematic,
             stage_for_robotics, run_fab_pipeline.
@@ -526,7 +555,7 @@ class InkscapeMCPServer:
             goal: str = "",
             dpi: int = 192,
         ) -> dict[str, Any]:
-            """INKSCAPE_SIM_ART — UI icon packs, vector sheets, Resonite/VRChat staging.
+            """INKSCAPE_SIM_ART - UI icon packs, vector sheets, Resonite/VRChat staging.
 
             Operations: list_presets, svg_pack_batch, build_icon_sheet, audit_svg_pack,
             ai_svg_refine_loop, push_gimp_texture_sheet, stage_resonite_ui, run_sim_pipeline.
@@ -554,30 +583,36 @@ class InkscapeMCPServer:
         @self.mcp.tool(
             annotations=ToolAnnotations(
                 readOnlyHint=False,
-                destructiveHint=False,
-                idempotentHint=True,
+                destructiveHint=True,
+                idempotentHint=False,
                 openWorldHint=False,
             ),
         )
-        async def inkscape_system(operation: InkscapeSystemOperation) -> dict[str, Any]:
-            """INKSCAPE_SYSTEM — Server/Inkscape status, help, diagnostics, version, extensions.
+        async def inkscape_system(
+            operation: InkscapeSystemOperation, action: str = ""
+        ) -> dict[str, Any]:
+            """INKSCAPE_SYSTEM - Server/Inkscape status, help, diagnostics, version, extensions.
 
             PORTMANTEAU RATIONALE: Operational and introspection calls stay in one discoverable tool.
 
-            Operations: status, execution_mode, help, diagnostics, version, config, list_extensions, execute_extension, self_terminate.
+            Operations: status, execution_mode, hands_in_command, help, diagnostics, version,
+            config, list_extensions, execute_extension, self_terminate.
 
             Args:
                 operation: System subcommand (Literal). Extension execution may require extra
-                    parameters not exposed on this MCP wrapper — prefer list_extensions first.
+                    parameters not exposed on this MCP wrapper - prefer list_extensions first.
+                action: Semicolon-separated Inkscape actions for hands_in_command. Requires
+                    a running Inkscape GUI and access to its desktop session.
 
             Returns:
                 Dict with success, message, data, execution_time_ms, error.
 
             Errors:
-                Inkscape missing, extension disabled — message describes recovery (install PATH).
+                Inkscape missing, extension disabled - message describes recovery (install PATH).
             """
             return await inkscape_system_tool(
                 operation=operation,
+                action=action,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )
@@ -591,16 +626,51 @@ class InkscapeMCPServer:
             ),
         )
         async def list_local_models() -> dict[str, Any]:
-            """LIST_LOCAL_MODELS — Discover Ollama and LM Studio model IDs on localhost (read-only).
+            """LIST_LOCAL_MODELS - Discover Ollama and LM Studio model IDs on localhost (read-only).
 
             Returns:
                 Dict with success, operation, summary, result.ollama / result.lm_studio lists,
                 and errors[] for unreachable endpoints (bounded).
 
             Errors:
-                Both endpoints down — result still returns with empty lists and diagnostic strings.
+                Both endpoints down - result still returns with empty lists and diagnostic strings.
             """
             return await list_local_models_tool()
+
+        @self.mcp.tool(
+            annotations=ToolAnnotations(
+                readOnlyHint=False,
+                destructiveHint=True,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
+        )
+        async def llm_ops(
+            operation: Literal["list_models", "loaded", "switch_model", "unload_all", "vram"],
+            provider: str = "ollama",
+            model: str = "",
+            endpoint: str = "",
+        ) -> dict[str, Any]:
+            """LLM_OPS - Manage the local LLM engine from an agent (same engine
+            path the webapp AI Settings page uses - UI and MCP clients cannot drift).
+
+            Ops: list_models (Ollama + LM Studio model IDs) | loaded (Ollama
+            residents + VRAM) | switch_model (make `model` the only resident:
+            evict rest, warm it) | unload_all (evict everything) | vram
+            (per-GPU telemetry). Only Ollama supports loaded/switch/unload -
+            it is the only engine with a load/unload API.
+
+            Returns:
+                Dict with success, operation, provider, plus op-specific fields
+                (evicted/warmed/engine for switch_model/unload_all, models for
+                loaded/list_models, gpus for vram).
+
+            Errors:
+                switch_model with an empty model - use list_models first, then
+                pass a name from that list. Non-ollama + loaded/switch/unload -
+                returns success=False with recovery_options instead of pretending.
+            """
+            return await llm_ops_tool(operation, provider=provider, model=model, endpoint=endpoint)
 
         self.tools = {
             "inkscape_file": inkscape_file,
@@ -613,6 +683,7 @@ class InkscapeMCPServer:
             "inkscape_sim_art": inkscape_sim_art,
             "inkscape_system": inkscape_system,
             "list_local_models": list_local_models,
+            "llm_ops": llm_ops,
         }
 
 
@@ -651,7 +722,7 @@ async def main_async():
 
     # Bridge this CLI to transport env.
     # If MCP_TRANSPORT is already set externally (e.g. Claude Desktop config env),
-    # honour it — only apply the argparser value when --mode was explicitly passed.
+    # honour it - only apply the argparser value when --mode was explicitly passed.
     explicit_mode = "--mode" in sys.argv
     if explicit_mode:
         os.environ["MCP_PORT"] = str(args.port)
@@ -662,7 +733,7 @@ async def main_async():
         else:
             os.environ["MCP_TRANSPORT"] = "http"
     else:
-        # No --mode arg — respect whatever MCP_TRANSPORT is already set to.
+        # No --mode arg - respect whatever MCP_TRANSPORT is already set to.
         # Fall back to http only if nothing is set at all.
         if not os.environ.get("MCP_TRANSPORT"):
             os.environ["MCP_TRANSPORT"] = "stdio"
@@ -686,7 +757,9 @@ async def main_async():
                 path=None,
                 debug=args.log_level.upper() == "DEBUG",
             )
-            await run_server_async(server.mcp, args=transport_args, server_name="Inkscape MCP Server")
+            await run_server_async(
+                server.mcp, args=transport_args, server_name="Inkscape MCP Server"
+            )
             logger.info("run_server_async returned (unexpected)")
         else:
             return 1

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import patch
 
 import pytest
+from PIL import Image
 
 from inkscape_mcp.cli_wrapper import InkscapeCliError
 from inkscape_mcp.cli_wrapper import InkscapeCliWrapper
@@ -32,6 +33,18 @@ class _FakeProcess:
 
     async def wait(self):
         return None
+
+
+SVG = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+
+
+async def _write_export(command, _timeout):
+    target = next(arg.partition("=")[2] for arg in command if arg.startswith("--export-filename="))
+    if Path(target).suffix == ".png":
+        Image.new("RGB", (2, 2)).save(target)
+    else:
+        Path(target).write_text(SVG)
+    return ""
 
 
 class TestInkscapeCliWrapper:
@@ -83,12 +96,12 @@ class TestInkscapeCliWrapper:
         assert fake_process.killed is True
 
     @pytest.mark.asyncio
-    async def test_execute_actions_success(self, mock_cli_wrapper):
+    async def test_execute_actions_success(self, mock_cli_wrapper, sample_svg_file):
         """Test successful actions execution."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="Actions executed successfully")
 
         result = await mock_cli_wrapper.execute_actions(
-            input_path="test.svg", actions=["select-all", "export-do"]
+            input_path=str(sample_svg_file), actions=["select-all", "export-do"]
         )
 
         assert result == "Actions executed successfully"
@@ -103,44 +116,59 @@ class TestInkscapeCliWrapper:
             ["select-all;object-to-path;export-do"],
         ],
     )
-    async def test_execute_actions_with_export(self, mock_cli_wrapper, actions):
+    async def test_execute_actions_with_export(
+        self, mock_cli_wrapper, sample_svg_file, tmp_path, actions
+    ):
         """Export actions stay separate from the filename and run exactly once."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
         original_actions = actions.copy()
-        output_path = "output image.svg"
+        output_path = str(tmp_path / "output image.svg")
+        mock_cli_wrapper._execute_command.side_effect = _write_export
 
         await mock_cli_wrapper.execute_actions(
-            input_path="test.svg",
+            input_path=str(sample_svg_file),
             actions=actions,
             output_path=output_path,
         )
 
         cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
-        assert f"--export-filename={Path(output_path).resolve()}" in cmd_args
-        assert "--actions=select-all;object-to-path;export-do" in cmd_args
+        target = Path(
+            next(arg.partition("=")[2] for arg in cmd_args if arg.startswith("--export-filename="))
+        )
+        assert target.parent == tmp_path
+        assert target != Path(output_path)
+        assert Path(output_path).read_text() == SVG
+        assert not target.exists()
+        assert "--actions=select-all;object-to-path" in cmd_args
         assert "--no-remote-resources" not in cmd_args
         assert actions == original_actions
 
     @pytest.mark.asyncio
-    async def test_execute_verbs_omits_unsupported_option(self, mock_cli_wrapper):
+    async def test_execute_verbs_uses_actions_api(self, mock_cli_wrapper, sample_svg_file):
         """Legacy verb commands must not include the unsupported remote-resource flag."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
 
-        await mock_cli_wrapper.execute_verbs("test.svg", ["EditSelectAll"])
+        await mock_cli_wrapper.execute_verbs(str(sample_svg_file), ["EditSelectAll"])
 
         cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
         assert "--batch-process" in cmd_args
-        assert "--verb" in cmd_args
+        assert "--verb" not in cmd_args
+        assert "--actions=select-all" in cmd_args
         assert "--no-remote-resources" not in cmd_args
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("method", ["execute_actions", "execute_verbs"])
-    async def test_batch_commands_use_distinct_application_ids(self, mock_cli_wrapper, method):
+    async def test_batch_commands_use_distinct_application_ids(
+        self, mock_cli_wrapper, sample_svg_file, method
+    ):
         """Concurrent batch jobs must not be forwarded to each other or the open GUI."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
 
         await asyncio.gather(
-            *(getattr(mock_cli_wrapper, method)("test.svg", ["select-all"]) for _ in range(3))
+            *(
+                getattr(mock_cli_wrapper, method)(str(sample_svg_file), ["select-all"])
+                for _ in range(3)
+            )
         )
 
         application_ids = []
@@ -154,12 +182,16 @@ class TestInkscapeCliWrapper:
         assert len(set(application_ids)) == 3
 
     @pytest.mark.asyncio
-    async def test_export_file_success(self, mock_cli_wrapper, temp_file):
+    async def test_export_file_success(self, mock_cli_wrapper, temp_file, tmp_path):
         """Test successful file export builds the expected CLI arguments."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
 
+        mock_cli_wrapper._execute_command.side_effect = _write_export
         result = await mock_cli_wrapper.export_file(
-            input_path=str(temp_file), output_path="output.png", export_type="png", dpi=300
+            input_path=str(temp_file),
+            output_path=str(tmp_path / "output.png"),
+            export_type="png",
+            dpi=300,
         )
 
         assert result == ""
@@ -169,42 +201,37 @@ class TestInkscapeCliWrapper:
         assert "--export-area-drawing" in cmd_args
 
     @pytest.mark.asyncio
-    async def test_export_file_unknown_format_not_validated(self, mock_cli_wrapper, temp_file):
-        """export_file performs no format validation - an unknown type is passed straight through."""
+    async def test_export_file_rejects_unknown_format(self, mock_cli_wrapper, temp_file):
         mock_cli_wrapper._execute_command = AsyncMock(return_value="")
-
-        await mock_cli_wrapper.export_file(
-            input_path=str(temp_file), output_path="output.invalid", export_type="invalid"
-        )
-
-        cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
-        assert "--export-type" in cmd_args
-        assert "invalid" in cmd_args
-        # Not a raster format, so no DPI flag is added
-        assert "--export-dpi" not in cmd_args
+        with pytest.raises(InkscapeExecutionError, match="Unsupported"):
+            await mock_cli_wrapper.export_file(
+                str(temp_file), "output.invalid", export_type="invalid"
+            )
+        mock_cli_wrapper._execute_command.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_query_object_success(self, mock_cli_wrapper):
+    async def test_query_object_success(self, mock_cli_wrapper, sample_svg_file):
         """Test object querying returns the raw CLI output string (no parsing)."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="10,20,100,50")
 
         result = await mock_cli_wrapper.query_object(
-            input_path="test.svg", object_id="rect1", query_type="bbox"
+            input_path=str(sample_svg_file), object_id="rect1", query_type="bbox"
         )
 
         assert result == "10,20,100,50"
         cmd_args = mock_cli_wrapper._execute_command.call_args.args[0]
         assert "--query-id" in cmd_args
         assert "rect1" in cmd_args
-        assert "--query-bbox" in cmd_args
+        assert "--query-bbox" not in cmd_args
+        assert all(f"--query-{axis}" in cmd_args for axis in ("x", "y", "width", "height"))
 
     @pytest.mark.asyncio
-    async def test_query_object_width_query_type(self, mock_cli_wrapper):
+    async def test_query_object_width_query_type(self, mock_cli_wrapper, sample_svg_file):
         """Test that query_type='width' selects the --query-width flag."""
         mock_cli_wrapper._execute_command = AsyncMock(return_value="42")
 
         result = await mock_cli_wrapper.query_object(
-            input_path="test.svg", object_id="rect1", query_type="width"
+            input_path=str(sample_svg_file), object_id="rect1", query_type="width"
         )
 
         assert result == "42"

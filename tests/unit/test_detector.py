@@ -5,6 +5,7 @@ Unit tests for Inkscape detector module.
 import logging
 import os
 import platform
+import subprocess
 from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -92,10 +93,12 @@ class TestInkscapeDetector:
         mock_key = Mock()
         mock_key.__enter__ = Mock(return_value=Mock())
         mock_key.__exit__ = Mock(return_value=None)
+        mock_registry = Mock()
+        mock_registry.OpenKey.return_value = mock_key
+        mock_registry.QueryValueEx.return_value = ("C:\\Program Files\\Inkscape", 1)
 
         with (
-            patch("winreg.OpenKey", return_value=mock_key),
-            patch("winreg.QueryValueEx", return_value=("C:\\Program Files\\Inkscape", 1)),
+            patch("inkscape_mcp.inkscape_detector.winreg", mock_registry, create=True),
             patch("pathlib.Path.exists", return_value=True),
         ):
             result = detector._check_windows_registry()
@@ -104,9 +107,11 @@ class TestInkscapeDetector:
     def test_windows_registry_not_found(self):
         """Test Windows registry search when Inkscape not found."""
         detector = InkscapeDetector()
+        mock_registry = Mock()
+        mock_registry.OpenKey.side_effect = FileNotFoundError
 
         with (
-            patch("winreg.OpenKey", side_effect=FileNotFoundError),
+            patch("inkscape_mcp.inkscape_detector.winreg", mock_registry, create=True),
             patch("pathlib.Path.exists", return_value=False),
             patch.object(detector, "_check_path_environment", return_value=None),
         ):
@@ -181,19 +186,18 @@ class TestInkscapeDetector:
         ):
             assert detector._validate_executable("/invalid/inkscape") is False
 
-    def test_validate_executable_timeout(self):
-        """Test executable validation with timeout."""
+    def test_path_environment_timeout(self):
+        """A timed out PATH lookup reports that no executable was found."""
         detector = InkscapeDetector()
 
-        with patch("subprocess.run", side_effect=TimeoutError):
-            result = detector._validate_executable(Path("/usr/bin/inkscape"))
-            assert result is False
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("which", 10)):
+            assert detector._check_path_environment(["inkscape"]) is None
 
     def test_validate_executable_exception(self):
-        """Test executable validation with exception."""
+        """An inaccessible executable is rejected without launching a process."""
         detector = InkscapeDetector()
 
-        with patch("subprocess.run", side_effect=Exception("Test error")):
+        with patch("pathlib.Path.exists", side_effect=OSError("Test error")):
             result = detector._validate_executable(Path("/usr/bin/inkscape"))
             assert result is False
 

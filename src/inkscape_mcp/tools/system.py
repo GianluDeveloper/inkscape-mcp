@@ -337,6 +337,11 @@ async def inkscape_system(
                 ).model_dump()
 
             try:
+                # Never allow callers to corrupt the bridge's internal start/end
+                # state; it is managed by --active-window itself (upstream #4765).
+                from inkscape_mcp.utils.inkscape_actions import validate_actions
+
+                validate_actions(action)
                 # Attempt --active-window: send actions to a running Inkscape GUI
                 result = await cli_wrapper._execute_command(
                     [str(config.inkscape_executable), "--active-window", "--actions", action],

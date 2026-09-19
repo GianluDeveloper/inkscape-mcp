@@ -157,12 +157,16 @@ Errors:
         - Check if file is locked by another process
 """
 
+import math
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel
+
+EXPORT_FORMATS = ("svg", "pdf", "eps", "png", "ps", "wmf", "emf", "xaml")
 
 
 class FileOperationResult(BaseModel):
@@ -178,7 +182,7 @@ class FileOperationResult(BaseModel):
 
 async def inkscape_file(
     operation: Literal["load", "save", "convert", "info", "validate", "list_formats"],
-    input_path: str,
+    input_path: str = "",
     output_path: str = "",
     format: str = "",
     _validate_structure: bool = True,
@@ -190,6 +194,9 @@ async def inkscape_file(
 
     try:
         input_path_obj = Path(input_path)
+        if operation in {"load", "save", "convert", "info", "validate"}:
+            if not input_path or not input_path_obj.is_file():
+                raise FileNotFoundError(f"File not found: {input_path}")
 
         if operation == "load":
             # Basic load and validate
@@ -233,21 +240,28 @@ async def inkscape_file(
                     error=str(e),
                 ).model_dump()
 
-        elif operation == "convert":
+        elif operation in {"save", "convert"}:
             if not output_path:
                 return FileOperationResult(
                     success=False,
-                    operation="convert",
-                    message="Output path required for convert operation",
+                    operation=operation,
+                    message=f"Output path required for {operation} operation",
                     data={},
                     execution_time_ms=(time.time() - start_time) * 1000,
                     error="ValueError",
                 ).model_dump()
 
-            # Use Inkscape export functionality
+            export_format = "svg" if operation == "save" else format.strip().lower()
+            if export_format not in EXPORT_FORMATS:
+                raise ValueError(
+                    f"Unsupported export format: {format!r}. Use one of {', '.join(EXPORT_FORMATS)}"
+                )
+            if operation == "save" and Path(output_path).suffix.lower() != ".svg":
+                raise ValueError("The save operation requires an .svg output path")
+
+            # The wrapper owns the filename and atomically publishes the export.
             actions = [
-                f"export-filename:{output_path}",
-                f"export-type:{format.upper()}",
+                f"export-type:{export_format}",
                 "export-do",
             ]
 
@@ -261,12 +275,12 @@ async def inkscape_file(
 
                 return FileOperationResult(
                     success=True,
-                    operation="convert",
-                    message=f"Converted {input_path} to {output_path}",
+                    operation=operation,
+                    message=f"{'Saved' if operation == 'save' else 'Converted'} {input_path} to {output_path}",
                     data={
                         "input_path": str(input_path_obj.resolve()),
                         "output_path": output_path,
-                        "format": format,
+                        "format": export_format,
                     },
                     execution_time_ms=(time.time() - start_time) * 1000,
                 ).model_dump()
@@ -274,8 +288,8 @@ async def inkscape_file(
             except Exception as e:
                 return FileOperationResult(
                     success=False,
-                    operation="convert",
-                    message=f"Conversion failed: {e}",
+                    operation=operation,
+                    message=f"{operation.capitalize()} failed: {e}",
                     data={},
                     execution_time_ms=(time.time() - start_time) * 1000,
                     error=str(e),
@@ -332,12 +346,18 @@ async def inkscape_file(
                 ).model_dump()
 
         elif operation == "validate":
-            # Basic validation by attempting to load
+            # Inkscape can exit zero for malformed input, so validate the SVG root
+            # and require a numeric query result before claiming success.
             try:
+                root = ET.parse(input_path_obj).getroot()
+                if root.tag not in {"svg", "{http://www.w3.org/2000/svg}svg"}:
+                    raise ValueError("Document root must be an SVG element")
                 result = await cli_wrapper._execute_command(
                     [str(config.inkscape_executable), str(input_path_obj), "--query-width"],
                     config.process_timeout,
                 )
+                if not math.isfinite(float(result.strip())):
+                    raise ValueError("Inkscape returned an invalid document width")
 
                 return FileOperationResult(
                     success=True,
@@ -365,7 +385,7 @@ async def inkscape_file(
 
         elif operation == "list_formats":
             # List supported export formats
-            formats = ["svg", "pdf", "eps", "png", "ps", "ai", "cdr", "wmf", "emf", "xaml"]
+            formats = list(EXPORT_FORMATS)
 
             return FileOperationResult(
                 success=True,

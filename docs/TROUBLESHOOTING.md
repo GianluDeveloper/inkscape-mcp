@@ -35,6 +35,42 @@
 
 ## Runtime Issues
 
+### Native crash in `active_window_end_helper` / `sp_repr_save_stream`
+
+Inkscape's internal `active-window-start` and `active-window-end` actions manage
+the live GUI command bridge. Calling them directly or out of sequence can crash
+the native document saver; [upstream issue #4765](https://gitlab.com/inkscape/inkscape/-/issues/4765)
+contains this stack trace. This is a matching failure path, not proof of the
+trigger for every crash with these frames.
+
+The MCP server rejects these internal actions before launching Inkscape, including
+inside semicolon-separated commands and shell sessions. Use ordinary editing
+actions in `hands_in_command`; Inkscape manages the bridge itself. Live GUI
+commands are serialized within each CLI wrapper. Independent MCP server processes
+or other clients can still compete for the same GUI, so use file-based operations
+for concurrent automation.
+
+Batch commands use separate application IDs. Managed CLI exports write a temporary
+file beside the destination and replace the destination only after successful
+execution and output checks (SVG XML, PNG integrity, PDF header/trailer).
+Failures, timeouts and cancellation preserve the existing destination. Unknown
+actions and missing object IDs are errors even when Inkscape exits with status 0;
+GTK/font warnings remain in logs rather than contaminating numeric query results.
+
+Restart the MCP connection after updating the server. These protections cannot
+guarantee that every native Inkscape bug is avoided. When reporting a remaining
+crash, include the action sequence and a minimal SVG that reproduces it.
+
+To run the runtime regressions with a real Inkscape installation:
+
+```bash
+uv run pytest tests/integration/test_inkscape_runtime.py -o addopts='' -q
+```
+
+The tests skip if Inkscape is unavailable. Run them in a normal desktop environment
+when testing raster imports: restrictive sandboxes may block the Glycin image
+loader's D-Bus communication on Linux.
+
 ### Operation Timeout
 
 **Error:** `Operation timed out`

@@ -83,7 +83,7 @@ class TestCompleteWorkflows:
             config=real_config,
         )
 
-        assert analysis_result["success"] is True
+        assert analysis_result["success"] is True, analysis_result
 
         # If we have objects, test vector operations
         objects = analysis_result.get("data", {}).get("objects", [])

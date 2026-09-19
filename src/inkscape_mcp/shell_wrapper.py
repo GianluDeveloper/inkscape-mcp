@@ -1,44 +1,36 @@
-"""
-Inkscape Shell Mode Wrapper - persistent Inkscape process for fast multi-step operations.
+"""Persistent, isolated Inkscape shell sessions for multi-step SVG operations.
 
-Inkscape 1.x supports `inkscape --shell` which opens an interactive action REPL.
-Instead of spawning a fresh process per operation (500-1500ms overhead each),
-the ShellModeWrapper keeps ONE Inkscape process alive and feeds it action strings
-line-by-line - dropping per-operation cost to ~20-80ms.
-
-Protocol:
-    - Input:  one action string per line, e.g. "file-open:/tmp/foo.svg\\n"
-    - Output: Inkscape prints ">" as a prompt after processing each command
-    - Multi-step: join with ";" separator, send as ONE line
-
-Usage:
-    async with ShellModeWrapper(inkscape_exe) as shell:
-        await shell.run_actions("file-open:/tmp/in.svg")
-        await shell.run_actions(
-            "select-all",
-            "path-union",
-            f"export-filename:/tmp/out.svg",
-            "export-do",
-        )
-        svg_xml = await shell.run_actions_and_read(output_path="/tmp/out.svg",
-            "select-all", "path-union",
-            "export-filename:/tmp/out.svg", "export-do"
-        )
-
-Thread safety: NOT thread-safe. Use one wrapper per concurrent workflow,
-or wrap usage in an asyncio.Lock.
+Calls on a wrapper are serialized. A complete pipeline is sent as one command;
+use a pool lease to keep a sequence of separate calls on the same document.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import math
+import re
+from collections import deque
 from pathlib import Path
+from uuid import uuid4
+
+from inkscape_mcp.utils.inkscape_actions import validate_actions
 
 logger = logging.getLogger(__name__)
 
-_SHELL_PROMPT = b">"
 _DEFAULT_TIMEOUT = 30.0
+_DIAGNOSTIC_LIMIT = 16_384
+_RESPONSE_LIMIT = 8 * 1024 * 1024
+_PROMPT = re.compile(rb"(?:^|\n)>[ \t\r]*$")
+_ACTION_ERROR = re.compile(
+    r"(?im)(?:^|\n).*?(?:parse_actions:.*(?:could not find|invalid)|"
+    r"unknown (?:option|action)|unable to (?:open|export)|"
+    r"unknown export type|no export type specified|"
+    r"failed to (?:load|open|save|export)|(?:^|\s)error:|"
+    r"cannot be opened|failed to create document|tracing failed|"
+    r"did not find object with id|emergency save activated|segmentation fault)"
+)
 
 
 class ShellModeError(Exception):
@@ -46,13 +38,7 @@ class ShellModeError(Exception):
 
 
 class ShellModeWrapper:
-    """
-    Persistent Inkscape --shell process wrapper.
-
-    Acts as an async context manager:
-        async with ShellModeWrapper(exe) as shell:
-            await shell.run_actions("select-all", "path-union", ...)
-    """
+    """Persistent Inkscape --shell process, usable as an async context manager."""
 
     def __init__(
         self,
@@ -60,55 +46,113 @@ class ShellModeWrapper:
         timeout: float = _DEFAULT_TIMEOUT,
         startup_timeout: float = 10.0,
     ) -> None:
-        if not Path(inkscape_exe).exists():
+        if not Path(inkscape_exe).is_file():
             raise ShellModeError(f"Inkscape executable not found: {inkscape_exe}")
+        if any(not math.isfinite(value) or value <= 0 for value in (timeout, startup_timeout)):
+            raise ValueError("Shell timeouts must be finite and positive")
         self._exe = inkscape_exe
         self._timeout = timeout
         self._startup_timeout = startup_timeout
         self._proc: asyncio.subprocess.Process | None = None
-
-    # ── lifecycle ────────────────────────────────────────────────────────────
+        self._lock = asyncio.Lock()
+        self._output_tail = bytearray()
 
     async def start(self) -> None:
-        """Launch the Inkscape --shell process and wait for initial prompt."""
-        if self._proc and self._proc.returncode is None:
-            return  # already running
-
-        logger.info("Starting Inkscape shell: %s --shell", self._exe)
-        self._proc = await asyncio.create_subprocess_exec(
-            self._exe,
-            "--shell",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        # Wait for the initial ">" prompt
-        try:
-            await asyncio.wait_for(self._read_until_prompt(), timeout=self._startup_timeout)
-        except TimeoutError as te:
-            await self.close()
-            raise ShellModeError(
-                f"Inkscape shell did not produce initial prompt within {self._startup_timeout}s. "
-                "Inkscape 1.0+ required."
-            ) from te
-        logger.info("Inkscape shell ready (pid=%s)", self._proc.pid)
+        """Launch an independent headless process and await its initial prompt."""
+        async with self._lock:
+            if self.is_running:
+                return
+            await self._stop(graceful=False)
+            self._output_tail.clear()
+            try:
+                self._proc = await asyncio.create_subprocess_exec(
+                    self._exe,
+                    f"--app-id-tag=inkscape_mcp_{uuid4().hex}",
+                    "--batch-process",
+                    "--shell",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    # One ordered stream makes action errors visible before the
+                    # following prompt, even when Inkscape keeps running/returns 0.
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                await asyncio.wait_for(self._read_until_prompt(), timeout=self._startup_timeout)
+            except asyncio.CancelledError:
+                await self._stop(graceful=False)
+                raise
+            except (OSError, TimeoutError, ShellModeError) as exc:
+                await self._stop(graceful=False)
+                raise ShellModeError(
+                    f"Inkscape shell failed to start within {self._startup_timeout}s: "
+                    f"{exc}{self._diagnostics()}"
+                ) from exc
+            logger.info("Inkscape shell ready (pid=%s)", self.pid)
 
     async def close(self) -> None:
-        """Shutdown the Inkscape shell process cleanly."""
-        if not self._proc:
+        """Close the session, kill it if necessary, and reap the child process."""
+        await self._finish_cleanup(asyncio.create_task(self._close_when_idle()))
+
+    async def _close_when_idle(self) -> None:
+        async with self._lock:
+            await self._stop(graceful=True)
+
+    async def _stop(self, *, graceful: bool) -> None:
+        """Finish cleanup even when the caller is cancelled a second time."""
+        if self._proc is not None:
+            await self._finish_cleanup(asyncio.create_task(self._stop_process(graceful=graceful)))
+
+    @staticmethod
+    async def _finish_cleanup(cleanup: asyncio.Task[None]) -> None:
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _stop_process(self, *, graceful: bool) -> None:
+        proc = self._proc
+        if proc is None:
             return
+        # Keep the merged output pipe drained while the child is exiting.
+        stdout_task = asyncio.create_task(self._discard_stdout(proc))
         try:
-            if self._proc.returncode is None:
-                self._proc.stdin.write(b"quit\n")
-                await self._proc.stdin.drain()
-                await asyncio.wait_for(self._proc.wait(), timeout=5.0)
-        except Exception:
-            pass
+            if proc.returncode is None and graceful:
+                try:
+                    async with asyncio.timeout(5.0):
+                        if proc.stdin is not None:
+                            proc.stdin.write(b"quit\n")
+                            await proc.stdin.drain()
+                        await proc.wait()
+                except (OSError, TimeoutError):
+                    pass
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+            await proc.wait()
+            await stdout_task
         finally:
-            if self._proc.returncode is None:
-                self._proc.kill()
+            if proc.stdin is not None:
+                proc.stdin.close()
+            stdout_task.cancel()
             self._proc = None
             logger.info("Inkscape shell closed")
+
+    async def _discard_stdout(self, proc: asyncio.subprocess.Process) -> None:
+        if proc.stdout is not None:
+            while chunk := await proc.stdout.read(65536):
+                self._remember_output(chunk)
+
+    def _remember_output(self, chunk: bytes) -> None:
+        self._output_tail.extend(chunk)
+        del self._output_tail[:-_DIAGNOSTIC_LIMIT]
+
+    def _diagnostics(self) -> str:
+        diagnostics = self._output_tail.decode("utf-8", errors="replace").strip()
+        return f"; output: {diagnostics}" if diagnostics else ""
 
     async def __aenter__(self) -> ShellModeWrapper:
         await self.start()
@@ -117,46 +161,58 @@ class ShellModeWrapper:
     async def __aexit__(self, *args) -> None:
         await self.close()
 
-    # ── public API ───────────────────────────────────────────────────────────
-
     async def run_actions(self, *actions: str) -> str:
-        """
-        Send one or more Inkscape actions to the shell in a single line.
-
-        Actions are joined with ';' and sent as one command.
-        Returns Inkscape's stdout response between the last two prompts.
-
-        Example:
-            await shell.run_actions(
-                "file-open:/tmp/drawing.svg",
-                "select-all",
-                "path-union",
-                "export-filename:/tmp/out.svg",
-                "export-do",
-            )
-        """
-        self._ensure_running()
-        command = ";".join(a.strip() for a in actions if a.strip()) + "\n"
-        logger.debug("Shell → %r", command.rstrip())
-        self._proc.stdin.write(command.encode())
-        await self._proc.stdin.drain()
-
+        """Run one action sequence; failures invalidate the session until restarted."""
         try:
-            response = await asyncio.wait_for(self._read_until_prompt(), timeout=self._timeout)
-        except TimeoutError as te:
+            command = ";".join(validate_actions(list(actions)))
+        except ValueError as exc:
+            raise ShellModeError(str(exc)) from exc
+        if not command:
+            raise ShellModeError("At least one shell action is required")
+        async with self._lock:
+            self._ensure_running()
+            self._output_tail.clear()
+            assert self._proc is not None and self._proc.stdin is not None
+            try:
+                # Include stdin backpressure in the command deadline.
+                async with asyncio.timeout(self._timeout):
+                    self._proc.stdin.write((command + "\n").encode())
+                    await self._proc.stdin.drain()
+                    response = await self._read_until_prompt()
+                    # Readline echoes the command. A filename containing a word
+                    # such as 'error:' must not itself be treated as an error.
+                    diagnostics = "\n".join(
+                        line for line in response.splitlines() if line != command
+                    )
+                    if _ACTION_ERROR.search(diagnostics):
+                        raise ShellModeError("Inkscape reported an action error")
+            except asyncio.CancelledError:
+                await self._stop(graceful=False)
+                raise
+            except (OSError, TimeoutError, ShellModeError) as exc:
+                await self._stop(graceful=False)
+                raise ShellModeError(
+                    f"Inkscape shell command failed (timeout {self._timeout}s): "
+                    f"{exc}{self._diagnostics()}"
+                ) from exc
+            return response
+
+    @staticmethod
+    def _action_path(path: str) -> str:
+        # The action grammar has no escaping for semicolons or line breaks.
+        if not path or any(c in str(path) for c in ";\r\n\0"):
             raise ShellModeError(
-                f"Inkscape shell timed out ({self._timeout}s) on: {command!r}"
-            ) from te
-        logger.debug("Shell ← %r", response[:120])
-        return response
+                "Action paths cannot be empty or contain semicolons, newlines or NUL bytes"
+            )
+        return str(Path(path).expanduser().resolve())
 
     async def open_file(self, path: str) -> str:
         """Open an SVG file in the shell session."""
-        return await self.run_actions(f"file-open:{path}")
+        return await self.run_actions(f"file-open:{self._action_path(path)}")
 
     async def save_file(self, output_path: str, plain_svg: bool = True) -> str:
         """Export the current document to output_path."""
-        actions: list[str] = [f"export-filename:{output_path}"]
+        actions = [f"export-filename:{self._action_path(output_path)}"]
         if plain_svg:
             actions.append("export-plain-svg")
         actions.append("export-do")
@@ -175,7 +231,10 @@ class ShellModeWrapper:
         return await self.run_actions("select-all", "path-intersection")
 
     async def path_simplify(self, threshold: float = 1.0) -> str:
-        return await self.run_actions("select-all", f"selection-simplify:{threshold}")
+        """Simplify using Inkscape preferences; shell actions have no threshold argument."""
+        if threshold != 1.0:
+            raise ShellModeError("The path-simplify action does not support a custom threshold")
+        return await self.run_actions("select-all", "path-simplify")
 
     async def text_to_path(self) -> str:
         return await self.run_actions("select-all", "object-to-path")
@@ -184,59 +243,44 @@ class ShellModeWrapper:
         return await self.run_actions("fit-canvas-to-drawing")
 
     async def vacuum_defs(self) -> str:
-        return await self.run_actions("vacuum-defs")
+        raise ShellModeError(
+            "Inkscape exposes no vacuum-defs shell action; use the CLI --vacuum-defs option"
+        )
 
     async def run_action_sequence(self, actions: list[str]) -> str:
         """Run a pre-built list of action strings as one command."""
         return await self.run_actions(*actions)
 
-    async def run_full_pipeline(
-        self,
-        input_path: str,
-        output_path: str,
-        actions: list[str],
-    ) -> str:
-        """
-        Convenience: open file, run actions, save. All in one shell session.
-
-        Returns Inkscape output from the final save step.
-        """
-        await self.open_file(input_path)
-        if actions:
-            await self.run_actions(*actions)
-        return await self.save_file(output_path)
-
-    # ── internal ─────────────────────────────────────────────────────────────
+    async def run_full_pipeline(self, input_path: str, output_path: str, actions: list[str]) -> str:
+        """Open, transform and export atomically with respect to other calls."""
+        return await self.run_actions(
+            f"file-open:{self._action_path(input_path)}",
+            *actions,
+            f"export-filename:{self._action_path(output_path)}",
+            "export-plain-svg",
+            "export-do",
+        )
 
     def _ensure_running(self) -> None:
-        if not self._proc or self._proc.returncode is not None:
+        if not self.is_running:
             raise ShellModeError(
-                "Inkscape shell is not running. "
-                "Use 'async with ShellModeWrapper(exe) as shell:' or call .start() first."
+                "Inkscape shell is not running; call start() or use its async context manager"
             )
 
     async def _read_until_prompt(self) -> str:
-        """
-        Read stdout bytes until we see the '>' prompt character on its own.
-        Returns everything read up to (but not including) the prompt.
-        """
+        """Recognize a prompt on its own line, not '>' inside SVG or diagnostics."""
         buf = bytearray()
-        assert self._proc is not None
+        assert self._proc is not None and self._proc.stdout is not None
         while True:
-            chunk = await self._proc.stdout.read(256)
+            chunk = await self._proc.stdout.read(4096)
             if not chunk:
                 raise ShellModeError("Inkscape shell process closed unexpectedly")
+            self._remember_output(chunk)
             buf.extend(chunk)
-            # The shell prints "> " or just ">" - look for a lone > at end of buffer
-            if buf.rstrip(b" \t\r\n").endswith(b">"):
-                break
-        # Strip the trailing prompt and decode
-        text = buf.decode("utf-8", errors="replace")
-        # Remove trailing "> " prompt
-        text = text.rstrip()
-        if text.endswith(">"):
-            text = text[:-1].rstrip()
-        return text
+            if len(buf) > _RESPONSE_LIMIT:
+                raise ShellModeError("Inkscape shell response exceeded the 8 MiB limit")
+            if prompt := _PROMPT.search(buf):
+                return buf[: prompt.start()].decode("utf-8", errors="replace").strip()
 
     @property
     def is_running(self) -> bool:
@@ -247,60 +291,88 @@ class ShellModeWrapper:
         return self._proc.pid if self._proc else None
 
 
-# ── pool for concurrent use ───────────────────────────────────────────────────
-
-
 class ShellModePool:
-    """
-    Simple pool of ShellModeWrapper instances for concurrent agentic workflows.
-    Each caller gets its own shell session (Inkscape shell is single-document).
-
-    Usage:
-        pool = ShellModePool(inkscape_exe, size=3)
-        await pool.start()
-        async with pool.acquire() as shell:
-            await shell.run_full_pipeline(...)
-        await pool.close()
-    """
+    """Pool with exclusive leases; each workflow gets its own document session."""
 
     def __init__(self, inkscape_exe: str, size: int = 3) -> None:
+        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            raise ValueError("Shell pool size must be a positive integer")
         self._exe = inkscape_exe
         self._size = size
         self._wrappers: list[ShellModeWrapper] = []
-        self._sem = asyncio.Semaphore(size)
+        self._available: deque[ShellModeWrapper] = deque()
+        self._condition = asyncio.Condition()
+        self._lifecycle_lock = asyncio.Lock()
+        self._started = False
 
     async def start(self) -> None:
-        self._wrappers = [ShellModeWrapper(self._exe) for _ in range(self._size)]
-        await asyncio.gather(*(w.start() for w in self._wrappers))
-        logger.info("ShellModePool started (%d sessions)", self._size)
+        async with self._lifecycle_lock:
+            if self._started:
+                return
+            wrappers = [ShellModeWrapper(self._exe) for _ in range(self._size)]
+            try:
+                results = await asyncio.gather(
+                    *(wrapper.start() for wrapper in wrappers), return_exceptions=True
+                )
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+            except BaseException:
+                await asyncio.gather(
+                    *(wrapper.close() for wrapper in wrappers), return_exceptions=True
+                )
+                raise
+            async with self._condition:
+                self._wrappers = wrappers
+                self._available.extend(wrappers)
+                self._started = True
+                self._condition.notify_all()
 
     async def close(self) -> None:
-        await asyncio.gather(*(w.close() for w in self._wrappers), return_exceptions=True)
-        self._wrappers.clear()
+        async with self._lifecycle_lock:
+            async with self._condition:
+                self._started = False
+                wrappers, self._wrappers = self._wrappers, []
+                self._available.clear()
+                self._condition.notify_all()
+            await asyncio.gather(*(wrapper.close() for wrapper in wrappers))
 
     def acquire(self) -> ShellModePool._AcquiredShell:
         return ShellModePool._AcquiredShell(self)
+
+    async def _release(self, wrapper: ShellModeWrapper) -> None:
+        async with self._condition:
+            if self._started and wrapper in self._wrappers:
+                self._available.append(wrapper)
+                self._condition.notify()
 
     class _AcquiredShell:
         def __init__(self, pool: ShellModePool) -> None:
             self._pool = pool
             self._wrapper: ShellModeWrapper | None = None
-            self._idx = 0
 
         async def __aenter__(self) -> ShellModeWrapper:
-            await self._pool._sem.acquire()
-            # Find a running wrapper
-            for i, w in enumerate(self._pool._wrappers):
-                if w.is_running:
-                    self._wrapper = w
-                    self._idx = i
-                    return w
-            # All crashed - restart one
-            w = ShellModeWrapper(self._pool._exe)
-            await w.start()
-            self._pool._wrappers[0] = w
-            self._wrapper = w
-            return w
+            if self._wrapper is not None:
+                raise ShellModeError("A shell lease cannot be entered twice")
+            async with self._pool._condition:
+                await self._pool._condition.wait_for(
+                    lambda: self._pool._available or not self._pool._started
+                )
+                if not self._pool._started:
+                    raise ShellModeError("Inkscape shell pool is not running")
+                wrapper = self._pool._available.popleft()
+            try:
+                if not wrapper.is_running:
+                    await wrapper.start()
+                if not self._pool._started or wrapper not in self._pool._wrappers:
+                    raise ShellModeError("Inkscape shell pool closed while acquiring a session")
+            except BaseException:
+                await self._pool._release(wrapper)
+                raise
+            self._wrapper = wrapper
+            return wrapper
 
         async def __aexit__(self, *args) -> None:
-            self._pool._sem.release()
+            if self._wrapper is not None:
+                await self._pool._release(self._wrapper)
+                self._wrapper = None

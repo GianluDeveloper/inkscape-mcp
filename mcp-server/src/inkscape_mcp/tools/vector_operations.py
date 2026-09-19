@@ -333,6 +333,7 @@ Errors:
 import math
 import re
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 from typing import Literal
@@ -394,24 +395,89 @@ async def inkscape_vector(
     operation_type: str = "",
     cli_wrapper: Any = None,
     config: Any = None,
-    **kwargs,
+    # Optional per-operation params (FastMCP 3.x rejects **kwargs on tools,
+    # so these are explicit; each applies only to the operation that uses it).
+    barcode_data: str = "",
+    preset_id: str = "",
+    x: int = 300,
+    y: int = 200,
+    threshold: float = 1.0,
+    dpi: int = 96,
+    units: str = "px",
+    shape: str = "rect",
+    params: dict[str, Any] | None = None,
+    element_type: str = "",
+    direction: str = "inset",
+    amount: float = 2.0,
+    output_dir: str = "",
+    lpe_id: str = "",
+    text: str = "",
+    font_family: str = "",
+    font_size: float = 0,
+    font_weight: str = "",
+    fill: str = "",
+    text_anchor: str = "",
+    svg_content: str = "",
 ) -> dict[str, Any]:
     """Inkscape vector operations portmanteau tool."""
     start_time = time.time()
 
+    # Pass-through dict for the shared LPE/text handlers (kept as dict internally).
+    kwargs = {
+        "barcode_data": barcode_data,
+        "preset_id": preset_id,
+        "x": x,
+        "y": y,
+        "threshold": threshold,
+        "dpi": dpi,
+        "units": units,
+        "shape": shape,
+        "params": params or {},
+        "element_type": element_type,
+        "direction": direction,
+        "amount": amount,
+        "output_dir": output_dir,
+        "lpe_id": lpe_id,
+        "text": text,
+        "font_family": font_family,
+        "font_size": font_size,
+        "font_weight": font_weight,
+        "fill": fill,
+        "text_anchor": text_anchor,
+    }
+
     try:
+        file_edit_operations = {
+            "trace_image",
+            "apply_boolean",
+            "path_simplify",
+            "path_clean",
+            "path_combine",
+            "path_break_apart",
+            "path_inset_outset",
+            "object_to_path",
+            "object_raise",
+            "object_lower",
+            "text_to_path",
+            "optimize_svg",
+            "scour_svg",
+            "export_dxf",
+            "render_preview",
+            "fit_canvas_to_drawing",
+            "set_document_units",
+        }
+        if operation in file_edit_operations and (not input_path or not output_path):
+            raise ValueError(f"input_path and output_path are required for {operation}")
+
         if operation == "trace_image":
             return await _trace_image(input_path, output_path, cli_wrapper, config)
 
         elif operation == "generate_barcode_qr":
-            return await _generate_barcode_qr(
-                kwargs.get("barcode_data", ""), output_path, cli_wrapper, config
-            )
+            return await _generate_barcode_qr(barcode_data, output_path, cli_wrapper, config)
 
         elif operation == "generate_laser_dot":
-            preset_id = kwargs.get("preset_id", "")
-            dot_x = kwargs.get("x", 300)
-            dot_y = kwargs.get("y", 200)
+            dot_x = x
+            dot_y = y
             if preset_id:
                 from ..utils.fab_art_presets import resolve_laser_preset
 
@@ -440,7 +506,7 @@ async def inkscape_vector(
                 input_path,
                 output_path,
                 object_id,
-                kwargs.get("threshold", 1.0),
+                threshold,
                 cli_wrapper,
                 config,
             )
@@ -449,9 +515,7 @@ async def inkscape_vector(
             return await _path_clean(input_path, output_path, cli_wrapper, config)
 
         elif operation == "render_preview":
-            return await _render_preview(
-                input_path, output_path, kwargs.get("dpi", 96), cli_wrapper, config
-            )
+            return await _render_preview(input_path, output_path, dpi, cli_wrapper, config)
 
         elif operation == "export_dxf":
             return await _export_dxf(input_path, output_path, cli_wrapper, config)
@@ -468,15 +532,13 @@ async def inkscape_vector(
             return await _object_lower(input_path, output_path, object_id, cli_wrapper, config)
 
         elif operation == "set_document_units":
-            return await _set_document_units(
-                input_path, output_path, kwargs.get("units", "px"), cli_wrapper, config
-            )
+            return await _set_document_units(input_path, output_path, units, cli_wrapper, config)
 
         elif operation == "create_object":
             return await _create_object(
                 output_path,
-                kwargs.get("shape", "rect"),
-                kwargs.get("params", {}),
+                shape,
+                params or {},
                 cli_wrapper,
                 config,
             )
@@ -486,15 +548,15 @@ async def inkscape_vector(
 
         elif operation == "construct_svg":
             return await _construct_svg(
-                output_path, kwargs.get("element_type", ""), kwargs.get("params", {}), config
+                output_path, element_type, params or {}, config, svg_content
             )
 
         elif operation == "path_inset_outset":
             return await _path_inset_outset(
                 input_path,
                 output_path,
-                kwargs.get("direction", "inset"),
-                kwargs.get("amount", 2.0),
+                direction,
+                amount,
                 cli_wrapper,
                 config,
             )
@@ -518,15 +580,17 @@ async def inkscape_vector(
             return await _fit_canvas_to_drawing(input_path, output_path, cli_wrapper, config)
 
         elif operation in ("list_lpes", "apply_lpe"):
-            return await _lpe_handler(operation, input_path, output_path, object_id, kwargs, cli_wrapper, config)
+            return await _lpe_handler(
+                operation, input_path, output_path, object_id, kwargs, cli_wrapper, config
+            )
 
         elif operation in ("text_set_content", "text_set_style", "text_list_fonts"):
-            return await _text_handler(operation, input_path, output_path, object_id, kwargs, cli_wrapper, config)
+            return await _text_handler(
+                operation, input_path, output_path, object_id, kwargs, cli_wrapper, config
+            )
 
         elif operation == "layers_to_files":
-            return await _layers_to_files(
-                input_path, output_path, kwargs.get("output_dir", ""), cli_wrapper, config
-            )
+            return await _layers_to_files(input_path, output_dir, cli_wrapper, config)
 
         else:
             return VectorOperationResult(
@@ -553,13 +617,15 @@ async def _trace_image(
     input_path: str, output_path: str, cli_wrapper: Any, config: Any
 ) -> dict[str, Any]:
     """Trace bitmap image to vector paths using potrace."""
+    start_time = time.perf_counter()
     try:
         actions = [
-            "file-open:" + input_path,
-            "selection-create-bitmap-copies",
-            "selection-trace",
-            "file-save-as:" + output_path,
-            "file-close",
+            # The input document is already opened by the wrapper. Lifecycle
+            # actions can switch/close it before the export has completed.
+            "select-by-element:image",
+            "object-trace:8,true,true,false,2,1,0.2",
+            "export-type:svg",
+            "export-do",
         ]
 
         await cli_wrapper._execute_actions(
@@ -574,7 +640,7 @@ async def _trace_image(
             operation="trace_image",
             message=f"Traced bitmap {input_path} to vector {output_path}",
             data={"input_path": input_path, "output_path": output_path, "method": "potrace"},
-            execution_time_ms=(time.time() - time.time()) * 1000,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
         ).model_dump()
 
     except Exception as e:
@@ -583,7 +649,7 @@ async def _trace_image(
             operation="trace_image",
             message=f"Bitmap tracing failed: {e}",
             data={},
-            execution_time_ms=0,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error=str(e),
         ).model_dump()
 
@@ -742,7 +808,10 @@ async def _measure_object(
 
 
 async def _inspect_object(
-    input_path: str, object_id: str, _cli_wrapper: Any, _config: Any,
+    input_path: str,
+    object_id: str,
+    _cli_wrapper: Any,
+    _config: Any,
 ) -> dict[str, Any]:
     """Inspect object style (fill, stroke, opacity, transform) from SVG XML."""
     try:
@@ -754,9 +823,12 @@ async def _inspect_object(
         m = tag_pattern.search(svg)
         if not m:
             return VectorOperationResult(
-                success=False, operation="inspect",
+                success=False,
+                operation="inspect",
                 message=f"Object '{object_id}' not found",
-                data={"object_id": object_id}, execution_time_ms=0, error="NotFound",
+                data={"object_id": object_id},
+                execution_time_ms=0,
+                error="NotFound",
             ).model_dump()
         el_type = m.group(1)
         tag_str = m.group(0)
@@ -779,34 +851,53 @@ async def _inspect_object(
             if _cli_wrapper and _config:
                 x_s = await _cli_wrapper._execute_command(
                     [str(_config.inkscape_executable), input_path, f"--query-x={object_id}"],
-                    _config.process_timeout)
+                    _config.process_timeout,
+                )
                 y_s = await _cli_wrapper._execute_command(
                     [str(_config.inkscape_executable), input_path, f"--query-y={object_id}"],
-                    _config.process_timeout)
+                    _config.process_timeout,
+                )
                 w_s = await _cli_wrapper._execute_command(
                     [str(_config.inkscape_executable), input_path, f"--query-width={object_id}"],
-                    _config.process_timeout)
+                    _config.process_timeout,
+                )
                 h_s = await _cli_wrapper._execute_command(
                     [str(_config.inkscape_executable), input_path, f"--query-height={object_id}"],
-                    _config.process_timeout)
-                bbox = {"x": float(x_s.strip()), "y": float(y_s.strip()),
-                        "w": float(w_s.strip()), "h": float(h_s.strip())}
+                    _config.process_timeout,
+                )
+                bbox = {
+                    "x": float(x_s.strip()),
+                    "y": float(y_s.strip()),
+                    "w": float(w_s.strip()),
+                    "h": float(h_s.strip()),
+                }
         except Exception:
             pass
         return VectorOperationResult(
-            success=True, operation="inspect",
+            success=True,
+            operation="inspect",
             message=f"Inspected {el_type}#{object_id}",
-            data={"object_id": object_id, "type": el_type,
-                  "fill": fill, "stroke": stroke, "stroke_width": stroke_width,
-                  "opacity": opacity, "transform": transform,
-                  "all_style": style, "bbox": bbox},
+            data={
+                "object_id": object_id,
+                "type": el_type,
+                "fill": fill,
+                "stroke": stroke,
+                "stroke_width": stroke_width,
+                "opacity": opacity,
+                "transform": transform,
+                "all_style": style,
+                "bbox": bbox,
+            },
             execution_time_ms=(time.time() - _start) * 1000,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="inspect",
-            message=f"Inspect failed: {e}", data={"object_id": object_id},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="inspect",
+            message=f"Inspect failed: {e}",
+            data={"object_id": object_id},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
@@ -833,28 +924,39 @@ async def _query_document(input_path: str, cli_wrapper: Any, config: Any) -> dic
             for line in all_str.strip().split("\n"):
                 parts = line.strip().split(",")
                 if len(parts) >= 5:
-                    objects.append({
-                        "id": parts[0], "x": float(parts[1]), "y": float(parts[2]),
-                        "w": float(parts[3]), "h": float(parts[4]),
-                    })
+                    objects.append(
+                        {
+                            "id": parts[0],
+                            "x": float(parts[1]),
+                            "y": float(parts[2]),
+                            "w": float(parts[3]),
+                            "h": float(parts[4]),
+                        }
+                    )
             object_count = len(objects)
         except Exception:
             object_count = 1
 
         return VectorOperationResult(
-            success=True, operation="query_document",
+            success=True,
+            operation="query_document",
             message=f"Queried {input_path}: {object_count} objects, {width}x{height}",
             data={
-                "width": width, "height": height,
-                "num_objects": object_count, "objects": objects,
+                "width": width,
+                "height": height,
+                "num_objects": object_count,
+                "objects": objects,
             },
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="query_document",
-            message=f"Document query failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="query_document",
+            message=f"Document query failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
@@ -871,7 +973,7 @@ async def _count_nodes(
         for line in query_output.strip().split("\n"):
             parts = line.strip().split(",")
             if parts and parts[0] == object_id:
-                # --query-all returns id,x,y,w,h — count of path nodes not directly available
+                # --query-all returns id,x,y,w,h - count of path nodes not directly available
                 # but we count objects matching the id
                 node_count += 1
         if node_count == 0:
@@ -885,9 +987,12 @@ async def _count_nodes(
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="count_nodes",
+            success=False,
+            operation="count_nodes",
             message=f"Node counting failed: {e}",
-            data={"object_id": object_id}, execution_time_ms=0, error=str(e),
+            data={"object_id": object_id},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
@@ -899,12 +1004,15 @@ async def _path_simplify(
     cli_wrapper: Any,
     config: Any,
 ) -> dict[str, Any]:
-    """Simplify path by reducing nodes."""
+    """Simplify path by reducing nodes with Inkscape's configured threshold."""
     try:
+        if not math.isfinite(threshold) or threshold <= 0:
+            raise ValueError("threshold must be a finite positive number")
+        if not object_id:
+            raise ValueError("object_id is required for path_simplify")
         actions = [
             f"select-by-id:{object_id}",
-            f"selection-simplify:{threshold}",
-            f"export-filename:{output_path}",
+            "path-simplify",
             "export-do",
         ]
 
@@ -924,6 +1032,7 @@ async def _path_simplify(
                 "output_path": output_path,
                 "object_id": object_id,
                 "threshold": threshold,
+                "note": "Inkscape uses its configured simplification threshold; the CLI action accepts no threshold argument.",
             },
             execution_time_ms=(time.time() - time.time()) * 1000,
         ).model_dump()
@@ -945,9 +1054,6 @@ async def _path_clean(
     """Clean SVG by removing unnecessary elements."""
     try:
         actions = [
-            "file-vacuum-defs",
-            "file-cleanup",
-            f"export-filename:{output_path}",
             "export-do",
         ]
 
@@ -956,6 +1062,7 @@ async def _path_clean(
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
+            vacuum_defs=True,
         )
 
         return VectorOperationResult(
@@ -986,8 +1093,7 @@ async def _export_dxf(
     """Export SVG paths to DXF for CAD/laser workflows."""
     try:
         actions = [
-            f"export-filename:{output_path}",
-            "export-type:DXF",
+            "export-type:dxf",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1022,15 +1128,24 @@ async def _render_preview(
     input_path: str, output_path: str, dpi: int, cli_wrapper: Any, config: Any
 ) -> dict[str, Any]:
     """Render PNG preview of SVG."""
+    start_time = time.perf_counter()
+    cli_output = ""
     try:
-        actions = [f"export-filename:{output_path}", f"export-dpi:{dpi}", "export-do"]
+        actions = ["export-type:png", f"export-dpi:{dpi}", "export-do"]
 
-        await cli_wrapper._execute_actions(
+        cli_output = await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
         )
+
+        preview_path = Path(output_path)
+        if not preview_path.is_file() or preview_path.stat().st_size == 0:
+            raise RuntimeError(
+                f"Inkscape did not create a nonempty preview file: {output_path}. "
+                f"CLI output: {cli_output or '(empty)'}"
+            )
 
         return VectorOperationResult(
             success=True,
@@ -1042,7 +1157,7 @@ async def _render_preview(
                 "dpi": dpi,
                 "format": "png",
             },
-            execution_time_ms=(time.time() - time.time()) * 1000,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
         ).model_dump()
 
     except Exception as e:
@@ -1050,8 +1165,8 @@ async def _render_preview(
             success=False,
             operation="render_preview",
             message=f"Preview rendering failed: {e}",
-            data={},
-            execution_time_ms=0,
+            data={"input_path": input_path, "output_path": output_path, "stdout": cli_output},
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error=str(e),
         ).model_dump()
 
@@ -1071,6 +1186,8 @@ async def _apply_boolean(
         if select_all:
             select_action = "select-all"
         elif object_ids:
+            if len(set(object_ids)) < 2:
+                raise ValueError("Boolean operations require at least two distinct object IDs")
             select_action = f"select-by-id:{','.join(object_ids)}"
         else:
             return VectorOperationResult(
@@ -1084,10 +1201,10 @@ async def _apply_boolean(
 
         # Map operation types to Inkscape actions
         operation_map = {
-            "union": "selection-union",
-            "difference": "selection-difference",
-            "intersection": "selection-intersection",
-            "exclusion": "selection-exclusion",
+            "union": "path-union",
+            "difference": "path-difference",
+            "intersection": "path-intersection",
+            "exclusion": "path-exclusion",
         }
 
         if boolean_type not in operation_map:
@@ -1103,7 +1220,7 @@ async def _apply_boolean(
         operation_action = operation_map[boolean_type]
 
         # MANDATORY: Complete action chain with export for persistence
-        actions = f"{select_action};{operation_action};export-filename:{output_path};export-do"
+        actions = f"{select_action};{operation_action};export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1143,9 +1260,7 @@ async def _object_raise(
 ) -> dict[str, Any]:
     """Raise object in Z-order (move up)."""
     try:
-        actions = (
-            f"select-by-id:{object_id};selection-raise;export-filename:{output_path};export-do"
-        )
+        actions = f"select-by-id:{object_id};selection-raise;export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1182,9 +1297,7 @@ async def _object_lower(
 ) -> dict[str, Any]:
     """Lower object in Z-order (move down)."""
     try:
-        actions = (
-            f"select-by-id:{object_id};selection-lower;export-filename:{output_path};export-do"
-        )
+        actions = f"select-by-id:{object_id};selection-lower;export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1222,28 +1335,35 @@ async def _set_document_units(
     """Set document units via export-filename/export-type:SVG with viewBox adjustment."""
     try:
         actions = [
-            f"export-filename:{output_path}",
-            "export-type:SVG",
+            "export-type:svg",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="set_document_units",
+            success=True,
+            operation="set_document_units",
             message=f"Re-exported {input_path} with unit hint '{units}' to {output_path}",
             data={
-                "input_path": input_path, "output_path": output_path,
-                "units": units, "note": "Use inkscape --export-overwrite + set document-properties for full units change",
+                "input_path": input_path,
+                "output_path": output_path,
+                "units": units,
+                "note": "Use inkscape --export-overwrite + set document-properties for full units change",
             },
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="set_document_units",
+            success=False,
+            operation="set_document_units",
             message=f"Document units setting failed: {e}",
-            data={"requested_units": units}, execution_time_ms=0, error=str(e),
+            data={"requested_units": units},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
@@ -1251,8 +1371,11 @@ async def _set_document_units(
 
 
 async def _create_object(
-    output_path: str, shape: str, params: dict[str, Any],
-    _cli_wrapper: Any, _config: Any,
+    output_path: str,
+    shape: str,
+    params: dict[str, Any],
+    _cli_wrapper: Any,
+    _config: Any,
 ) -> dict[str, Any]:
     """Create an SVG document with a primitive shape (rect, circle, ellipse, star, text, path)."""
     _start = time.time()
@@ -1281,9 +1404,7 @@ async def _create_object(
             cy = params.get("cy", h / 2)
             r = params.get("r", min(w, h) / 4)
             fill = params.get("fill", "#ff4488")
-            elements.append(
-                f'<circle id="{name}" cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>'
-            )
+            elements.append(f'<circle id="{name}" cx="{cx}" cy="{cy}" r="{r}" fill="{fill}"/>')
         elif shape == "ellipse":
             cx = params.get("cx", w / 2)
             cy = params.get("cy", h / 2)
@@ -1304,10 +1425,10 @@ async def _create_object(
             for i in range(points * 2):
                 angle = math.radians(i * 180 / points - 90)
                 r_val = outer if i % 2 == 0 else inner
-                poly_pts.append(f"{cx + r_val * math.cos(angle):.1f},{cy + r_val * math.sin(angle):.1f}")
-            elements.append(
-                f'<polygon id="{name}" points="{" ".join(poly_pts)}" fill="{fill}"/>'
-            )
+                poly_pts.append(
+                    f"{cx + r_val * math.cos(angle):.1f},{cy + r_val * math.sin(angle):.1f}"
+                )
+            elements.append(f'<polygon id="{name}" points="{" ".join(poly_pts)}" fill="{fill}"/>')
         elif shape == "text":
             content = params.get("content", "Text")
             x = params.get("x", 20)
@@ -1329,265 +1450,387 @@ async def _create_object(
             )
         else:
             return VectorOperationResult(
-                success=False, operation="create_object",
+                success=False,
+                operation="create_object",
                 message=f"Unknown shape '{shape}'. Supported: rect, circle, ellipse, star, text, path",
-                data={}, execution_time_ms=0, error="ValueError",
+                data={},
+                execution_time_ms=0,
+                error="ValueError",
             ).model_dump()
 
         svg = f"{svg_header}\n  " + "\n  ".join(elements) + "\n</svg>"
         Path(output_path).write_text(svg, encoding="utf-8")
 
         return VectorOperationResult(
-            success=True, operation="create_object",
+            success=True,
+            operation="create_object",
             message=f"Created {shape} '{name}' at {output_path}",
             data={"shape": shape, "params": params, "output_path": output_path},
             execution_time_ms=(time.time() - _start) * 1000,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="create_object",
-            message=f"Object creation failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="create_object",
+            message=f"Object creation failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _text_to_path(
-    input_path: str, output_path: str, object_id: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    object_id: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Convert text objects to paths via Inkscape actions."""
     try:
         select = f"select-by-id:{object_id}" if object_id else "select-by-element:text"
-        actions = [select, "object-to-path", f"export-filename:{output_path}", "export-do"]
+        actions = [select, "object-to-path", "export-do"]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="text_to_path",
+            success=True,
+            operation="text_to_path",
             message=f"Converted text to path: {output_path}",
             data={"input_path": input_path, "output_path": output_path, "object_id": object_id},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="text_to_path",
-            message=f"Text to path failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="text_to_path",
+            message=f"Text to path failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _construct_svg(
-    output_path: str, element_type: str, params: dict[str, Any], _config: Any,
+    output_path: str,
+    element_type: str,
+    params: dict[str, Any],
+    config: Any,
+    svg_content: str = "",
 ) -> dict[str, Any]:
-    """Construct a new SVG from raw element definitions (header + body)."""
+    """Write supplied SVG XML or header/body/footer after validating the document."""
     try:
-        header = params.get("header", '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">')
-        body = params.get("body", "")
-        footer = params.get("footer", "</svg>")
-        svg_content = f"{header}\n{body}\n{footer}"
-        Path(output_path).write_text(svg_content, encoding="utf-8")
+        if not output_path:
+            raise ValueError("output_path is required for construct_svg")
+        path = Path(output_path).expanduser().resolve()
+        if path.suffix.lower() != ".svg":
+            raise ValueError("output_path must have an .svg extension")
+        allowed = getattr(config, "allowed_directories", []) or []
+        if allowed and not any(
+            path.is_relative_to(Path(p).expanduser().resolve()) for p in allowed
+        ):
+            raise ValueError("output_path is outside allowed_directories")
+        if not svg_content.strip():
+            body = params.get("body", "")
+            if not isinstance(body, str) or not body.strip():
+                raise ValueError("Provide svg_content or params.body for construct_svg")
+            header = params.get(
+                "header", '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">'
+            )
+            footer = params.get("footer", "</svg>")
+            svg_content = f"{header}\n{body}\n{footer}"
+        max_bytes = getattr(config, "max_file_size_mb", 100) * 1024 * 1024
+        if len(svg_content.encode("utf-8")) > max_bytes:
+            raise ValueError("SVG exceeds max_file_size_mb")
+        root = ET.fromstring(svg_content)
+        if root.tag not in ("svg", "{http://www.w3.org/2000/svg}svg"):
+            raise ValueError("Root element must be SVG")
+        path.write_text(svg_content, encoding="utf-8")
         return VectorOperationResult(
-            success=True, operation="construct_svg",
+            success=True,
+            operation="construct_svg",
             message=f"Constructed SVG document at {output_path}",
-            data={"element_type": element_type, "path": output_path},
+            data={"element_type": element_type, "path": str(path)},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="construct_svg",
-            message=f"SVG construction failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="construct_svg",
+            message=f"SVG construction failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _path_inset_outset(
-    input_path: str, output_path: str, direction: str, amount: float,
-    cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    direction: str,
+    amount: float,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Inset or outset selected paths."""
     try:
         action = "selection-inset" if direction == "inset" else "selection-outset"
-        actions = ["select-all", f"{action}:{amount}", f"export-filename:{output_path}", "export-do"]
+        actions = [
+            "select-all",
+            f"{action}:{amount}",
+            "export-do",
+        ]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="path_inset_outset",
+            success=True,
+            operation="path_inset_outset",
             message=f"Applied {direction} ({amount}px) to {input_path}",
-            data={"input_path": input_path, "output_path": output_path,
-                  "direction": direction, "amount": amount},
+            data={
+                "input_path": input_path,
+                "output_path": output_path,
+                "direction": direction,
+                "amount": amount,
+            },
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="path_inset_outset",
-            message=f"Path inset/outset failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="path_inset_outset",
+            message=f"Path inset/outset failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _path_combine(
-    input_path: str, output_path: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Combine selected paths into a single path."""
     try:
-        actions = ["select-all", "path-combine", f"export-filename:{output_path}", "export-do"]
+        actions = ["select-all", "path-combine", "export-do"]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="path_combine",
+            success=True,
+            operation="path_combine",
             message=f"Combined paths from {input_path} to {output_path}",
             data={"input_path": input_path, "output_path": output_path},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="path_combine",
-            message=f"Path combine failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="path_combine",
+            message=f"Path combine failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _path_break_apart(
-    input_path: str, output_path: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Break apart a compound path into individual paths."""
     try:
-        actions = ["select-all", "path-break-apart", f"export-filename:{output_path}", "export-do"]
+        actions = ["select-all", "path-break-apart", "export-do"]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="path_break_apart",
+            success=True,
+            operation="path_break_apart",
             message=f"Broke apart paths from {input_path} to {output_path}",
             data={"input_path": input_path, "output_path": output_path},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="path_break_apart",
-            message=f"Path break apart failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="path_break_apart",
+            message=f"Path break apart failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _object_to_path(
-    input_path: str, output_path: str, object_id: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    object_id: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Convert a shape object (rect, circle, star, text) to paths."""
     try:
         select = f"select-by-id:{object_id}" if object_id else "select-all"
-        actions = [select, "object-to-path", f"export-filename:{output_path}", "export-do"]
+        actions = [select, "object-to-path", "export-do"]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="object_to_path",
+            success=True,
+            operation="object_to_path",
             message=f"Converted object(s) to paths: {output_path}",
             data={"input_path": input_path, "output_path": output_path, "object_id": object_id},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="object_to_path",
-            message=f"Object to path failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="object_to_path",
+            message=f"Object to path failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _optimize_svg(
-    input_path: str, output_path: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Optimize SVG by vacuuming unused defs and cleaning up."""
     try:
-        actions = ["file-vacuum-defs", "file-cleanup", f"export-filename:{output_path}", "export-do"]
+        actions = [
+            "export-do",
+        ]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
+            vacuum_defs=True,
         )
         return VectorOperationResult(
-            success=True, operation="optimize_svg",
+            success=True,
+            operation="optimize_svg",
             message=f"Optimized {input_path} -> {output_path}",
             data={"input_path": input_path, "output_path": output_path},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="optimize_svg",
-            message=f"SVG optimization failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="optimize_svg",
+            message=f"SVG optimization failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _scour_svg(
-    input_path: str, output_path: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Aggressive SVG cleanup: vacuum defs, strip IDs, remove metadata."""
     try:
         actions = [
-            "file-vacuum-defs",
-            "file-cleanup",
             "select-all",
-            "selection-unlink-recursive",
-            f"export-filename:{output_path}",
-            "export-type:SVG",
+            "object-unlink-clones",
+            "export-type:svg",
             "export-plain-svg",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
+            vacuum_defs=True,
         )
         return VectorOperationResult(
-            success=True, operation="scour_svg",
+            success=True,
+            operation="scour_svg",
             message=f"Scoured {input_path} -> {output_path} (plain SVG)",
             data={"input_path": input_path, "output_path": output_path, "method": "plain-svg"},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="scour_svg",
-            message=f"SVG scour failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="scour_svg",
+            message=f"SVG scour failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _fit_canvas_to_drawing(
-    input_path: str, output_path: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_path: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Resize the SVG canvas to tightly fit all drawing content."""
     try:
         actions = [
             "select-all",
             "fit-canvas-to-selection",
-            f"export-filename:{output_path}",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="fit_canvas_to_drawing",
+            success=True,
+            operation="fit_canvas_to_drawing",
             message=f"Canvas fitted to drawing: {output_path}",
             data={"input_path": input_path, "output_path": output_path},
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="fit_canvas_to_drawing",
-            message=f"Canvas fit failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="fit_canvas_to_drawing",
+            message=f"Canvas fit failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 async def _layers_to_files(
-    input_path: str, output_dir: str, cli_wrapper: Any, config: Any,
+    input_path: str,
+    output_dir: str,
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Export each top-level layer to a separate file."""
     try:
@@ -1614,31 +1857,40 @@ async def _layers_to_files(
             out_file = out_dir / f"{lid}.svg"
             actions = [
                 f"select-by-id:{lid}",
-                f"export-filename:{out_file}",
-                "export-type:SVG",
+                "export-type:svg",
                 "export-do",
             ]
             try:
                 await cli_wrapper._execute_actions(
-                    input_path=input_path, actions=actions,
-                    output_path=str(out_file), timeout=config.process_timeout,
+                    input_path=input_path,
+                    actions=actions,
+                    output_path=str(out_file),
+                    timeout=config.process_timeout,
                 )
                 exported.append(str(out_file))
             except Exception:
                 pass
 
         return VectorOperationResult(
-            success=True, operation="layers_to_files",
+            success=True,
+            operation="layers_to_files",
             message=f"Exported {len(exported)} layers to {out_dir}",
-            data={"input_path": input_path, "output_dir": str(out_dir),
-                  "exported": exported, "layer_ids_probed": layer_ids},
+            data={
+                "input_path": input_path,
+                "output_dir": str(out_dir),
+                "exported": exported,
+                "layer_ids_probed": layer_ids,
+            },
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="layers_to_files",
-            message=f"Layer export failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation="layers_to_files",
+            message=f"Layer export failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
@@ -1646,12 +1898,24 @@ async def _layers_to_files(
 
 _LPE_CATALOG: list[dict[str, str]] = [
     {"id": "bend", "label": "Bend", "desc": "Bend paths along a curve"},
-    {"id": "envelope", "label": "Envelope Deformation", "desc": "Deform paths within an envelope shape"},
-    {"id": "pattern_along_path", "label": "Pattern Along Path", "desc": "Repeat a pattern along a path"},
+    {
+        "id": "envelope",
+        "label": "Envelope Deformation",
+        "desc": "Deform paths within an envelope shape",
+    },
+    {
+        "id": "pattern_along_path",
+        "label": "Pattern Along Path",
+        "desc": "Repeat a pattern along a path",
+    },
     {"id": "interpolate", "label": "Interpolate Sub-Paths", "desc": "Blend between two paths"},
     {"id": "roughen", "label": "Roughen", "desc": "Add random jitter to path nodes"},
     {"id": "sketch", "label": "Sketch", "desc": "Hatching/strokes for sketch effect"},
-    {"id": "stitch_sub_paths", "label": "Stitch Sub-Paths", "desc": "Connect sub-paths with zigzag"},
+    {
+        "id": "stitch_sub_paths",
+        "label": "Stitch Sub-Paths",
+        "desc": "Connect sub-paths with zigzag",
+    },
     {"id": "bspline", "label": "BSpline", "desc": "Convert path to B-Spline curve"},
     {"id": "corners", "label": "Corners (Chamfer/Fillet)", "desc": "Round or chamfer path corners"},
     {"id": "power_stroke", "label": "Power Stroke", "desc": "Variable-width stroke along path"},
@@ -1664,13 +1928,19 @@ _LPE_CATALOG: list[dict[str, str]] = [
 
 
 async def _lpe_handler(
-    operation: str, input_path: str, output_path: str, object_id: str,
-    kwargs: dict[str, Any], cli_wrapper: Any, config: Any,
+    operation: str,
+    input_path: str,
+    output_path: str,
+    object_id: str,
+    kwargs: dict[str, Any],
+    cli_wrapper: Any,
+    config: Any,
 ) -> dict[str, Any]:
     """Handle list_lpes and apply_lpe."""
     if operation == "list_lpes":
         return VectorOperationResult(
-            success=True, operation="list_lpes",
+            success=True,
+            operation="list_lpes",
             message=f"Found {len(_LPE_CATALOG)} Live Path Effects",
             data={"lpes": _LPE_CATALOG, "count": len(_LPE_CATALOG)},
             execution_time_ms=0,
@@ -1681,9 +1951,12 @@ async def _lpe_handler(
     lpe_params = kwargs.get("params", {})
     if not lpe_id or not input_path or not output_path:
         return VectorOperationResult(
-            success=False, operation="apply_lpe",
+            success=False,
+            operation="apply_lpe",
             message="Required: lpe_id, input_path, output_path",
-            data={"available_lpes": _LPE_CATALOG}, execution_time_ms=0, error="ValueError",
+            data={"available_lpes": _LPE_CATALOG},
+            execution_time_ms=0,
+            error="ValueError",
         ).model_dump()
 
     try:
@@ -1694,36 +1967,66 @@ async def _lpe_handler(
         actions = [select, effect_verb]
         if param_str:
             actions.append(f"lpe-param-set:{param_str}")
-        actions.extend([f"export-filename:{output_path}", "export-do"])
+        actions.extend(["export-do"])
 
         await cli_wrapper._execute_actions(
-            input_path=input_path, actions=actions,
-            output_path=output_path, timeout=config.process_timeout,
+            input_path=input_path,
+            actions=actions,
+            output_path=output_path,
+            timeout=config.process_timeout,
         )
         return VectorOperationResult(
-            success=True, operation="apply_lpe",
+            success=True,
+            operation="apply_lpe",
             message=f"Applied LPE '{lpe_id}' to {input_path}",
-            data={"lpe_id": lpe_id, "params": lpe_params,
-                  "input_path": input_path, "output_path": output_path},
+            data={
+                "lpe_id": lpe_id,
+                "params": lpe_params,
+                "input_path": input_path,
+                "output_path": output_path,
+            },
             execution_time_ms=0,
         ).model_dump()
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation="apply_lpe",
+            success=False,
+            operation="apply_lpe",
             message=f"LPE application failed: {e}. Try hands_in_command with Inkscape GUI open.",
             data={"lpe_id": lpe_id, "hint": "Some LPEs require the Inkscape GUI for live preview"},
-            execution_time_ms=0, error=str(e),
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()
 
 
 # ── Text operations ───────────────────────────────────────────────────────────
 
 _SYSTEM_FONTS = [
-    "Arial", "Helvetica", "Verdana", "Tahoma", "Trebuchet MS", "Times New Roman",
-    "Georgia", "Garamond", "Palatino", "Courier New", "Courier", "monospace",
-    "Impact", "Comic Sans MS", "Lucida Console", "Lucida Sans Unicode",
-    "Segoe UI", "Candara", "Calibri", "Cambria", "Constantia", "Corbel",
-    "sans-serif", "serif", "fantasy", "cursive",
+    "Arial",
+    "Helvetica",
+    "Verdana",
+    "Tahoma",
+    "Trebuchet MS",
+    "Times New Roman",
+    "Georgia",
+    "Garamond",
+    "Palatino",
+    "Courier New",
+    "Courier",
+    "monospace",
+    "Impact",
+    "Comic Sans MS",
+    "Lucida Console",
+    "Lucida Sans Unicode",
+    "Segoe UI",
+    "Candara",
+    "Calibri",
+    "Cambria",
+    "Constantia",
+    "Corbel",
+    "sans-serif",
+    "serif",
+    "fantasy",
+    "cursive",
 ]
 
 # Also try to get fonts from system font directory
@@ -1738,13 +2041,19 @@ except Exception:
 
 
 async def _text_handler(
-    operation: str, input_path: str, output_path: str, object_id: str,
-    kwargs: dict[str, Any], _cli_wrapper: Any, _config: Any,
+    operation: str,
+    input_path: str,
+    output_path: str,
+    object_id: str,
+    kwargs: dict[str, Any],
+    _cli_wrapper: Any,
+    _config: Any,
 ) -> dict[str, Any]:
     """Handle text operations (text_set_content, text_set_style, text_list_fonts)."""
     if operation == "text_list_fonts":
         return VectorOperationResult(
-            success=True, operation="text_list_fonts",
+            success=True,
+            operation="text_list_fonts",
             message=f"Found {len(_SYSTEM_FONTS)} available fonts",
             data={"fonts": _SYSTEM_FONTS, "count": len(_SYSTEM_FONTS)},
             execution_time_ms=0,
@@ -1752,9 +2061,12 @@ async def _text_handler(
 
     if not input_path:
         return VectorOperationResult(
-            success=False, operation=operation,
-            message="input_path is required", data={},
-            execution_time_ms=0, error="ValueError",
+            success=False,
+            operation=operation,
+            message="input_path is required",
+            data={},
+            execution_time_ms=0,
+            error="ValueError",
         ).model_dump()
 
     try:
@@ -1765,29 +2077,41 @@ async def _text_handler(
             new_text = kwargs.get("text", "")
             if not object_id or not new_text:
                 return VectorOperationResult(
-                    success=False, operation="text_set_content",
-                    message="object_id and text are required", data={},
-                    execution_time_ms=0, error="ValueError",
+                    success=False,
+                    operation="text_set_content",
+                    message="object_id and text are required",
+                    data={},
+                    execution_time_ms=0,
+                    error="ValueError",
                 ).model_dump()
+
             # Replace content of <text id="...">...content...</text>
             def _replace_text(m: re.Match) -> str:
                 tag = m.group(1)
                 # Preserve child elements (tspan, etc.) by only replacing direct text
-                return f'<{tag} id="{object_id}"' + m.group(0).partition(f'id="{object_id}"')[2].split(">", 1)[0] + f">{new_text}</{tag.split()[0]}>"
+                return (
+                    f'<{tag} id="{object_id}"'
+                    + m.group(0).partition(f'id="{object_id}"')[2].split(">", 1)[0]
+                    + f">{new_text}</{tag.split()[0]}>"
+                )
 
             pattern = re.compile(
                 rf'<(text)(?:\s+[^>]*)?\s+id="{re.escape(object_id)}"[^>]*>(.*?)</\1>', re.DOTALL
             )
             if not pattern.search(svg):
                 return VectorOperationResult(
-                    success=False, operation="text_set_content",
-                    message=f"Text element '{object_id}' not found", data={},
-                    execution_time_ms=0, error="NotFound",
+                    success=False,
+                    operation="text_set_content",
+                    message=f"Text element '{object_id}' not found",
+                    data={},
+                    execution_time_ms=0,
+                    error="NotFound",
                 ).model_dump()
             new_svg = pattern.sub(_replace_text, svg)
             Path(dest).write_text(new_svg, encoding="utf-8")
             return VectorOperationResult(
-                success=True, operation="text_set_content",
+                success=True,
+                operation="text_set_content",
                 message=f"Updated text content for '{object_id}'",
                 data={"object_id": object_id, "new_text": new_text, "path": dest},
                 execution_time_ms=0,
@@ -1802,16 +2126,19 @@ async def _text_handler(
 
             if not object_id:
                 return VectorOperationResult(
-                    success=False, operation="text_set_style",
-                    message="object_id is required", data={},
-                    execution_time_ms=0, error="ValueError",
+                    success=False,
+                    operation="text_set_style",
+                    message="object_id is required",
+                    data={},
+                    execution_time_ms=0,
+                    error="ValueError",
                 ).model_dump()
 
             # Find the element and set attributes
             def _tag_edit(m: re.Match) -> str:
                 full = m.group(0)
                 tag_open = full[: full.index(">") + 1] if ">" in full else full
-                rest = full[len(tag_open):]
+                rest = full[len(tag_open) :]
                 attrs_to_set = {}
                 if font_family:
                     attrs_to_set["font-family"] = font_family
@@ -1828,41 +2155,65 @@ async def _text_handler(
                     if f'{k}="' in new_tag or f"{k}='" in new_tag:
                         new_tag = re.sub(rf'\b{k}\s*=\s*["\'][^"\']*["\']', f'{k}="{v}"', new_tag)
                     else:
-                        new_tag = new_tag.rstrip("/>-").rstrip() + f' {k}="{v}"' + (
-                            "/>" if "/>" in new_tag else ">"
+                        new_tag = (
+                            new_tag.rstrip("/>-").rstrip()
+                            + f' {k}="{v}"'
+                            + ("/>" if "/>" in new_tag else ">")
                         )
                 return new_tag + rest
 
-            pattern = re.compile(rf'<(?:text|tspan)[^>]*\s+id="{re.escape(object_id)}"[^>]*/?>(?:.*?</(?:text|tspan)>)?', re.DOTALL)
+            pattern = re.compile(
+                rf'<(?:text|tspan)[^>]*\s+id="{re.escape(object_id)}"[^>]*/?>(?:.*?</(?:text|tspan)>)?',
+                re.DOTALL,
+            )
             if not pattern.search(svg):
                 return VectorOperationResult(
-                    success=False, operation="text_set_style",
-                    message=f"Element '{object_id}' not found", data={},
-                    execution_time_ms=0, error="NotFound",
+                    success=False,
+                    operation="text_set_style",
+                    message=f"Element '{object_id}' not found",
+                    data={},
+                    execution_time_ms=0,
+                    error="NotFound",
                 ).model_dump()
             new_svg = pattern.sub(_tag_edit, svg)
             Path(dest).write_text(new_svg, encoding="utf-8")
             return VectorOperationResult(
-                success=True, operation="text_set_style",
+                success=True,
+                operation="text_set_style",
                 message=f"Updated style for '{object_id}'",
-                data={"object_id": object_id, "changes": {
-                    k: v for k, v in [("font_family", font_family), ("font_size", font_size),
-                                      ("font_weight", font_weight), ("fill", fill),
-                                      ("text_anchor", text_anchor)] if v or (k == "font_size" and v)
-                }},
+                data={
+                    "object_id": object_id,
+                    "changes": {
+                        k: v
+                        for k, v in [
+                            ("font_family", font_family),
+                            ("font_size", font_size),
+                            ("font_weight", font_weight),
+                            ("fill", fill),
+                            ("text_anchor", text_anchor),
+                        ]
+                        if v or (k == "font_size" and v)
+                    },
+                },
                 execution_time_ms=0,
             ).model_dump()
 
         else:
             return VectorOperationResult(
-                success=False, operation=operation,
-                message=f"Unknown text operation: {operation}", data={},
-                execution_time_ms=0, error="ValueError",
+                success=False,
+                operation=operation,
+                message=f"Unknown text operation: {operation}",
+                data={},
+                execution_time_ms=0,
+                error="ValueError",
             ).model_dump()
 
     except Exception as e:
         return VectorOperationResult(
-            success=False, operation=operation,
-            message=f"Text operation failed: {e}", data={},
-            execution_time_ms=0, error=str(e),
+            success=False,
+            operation=operation,
+            message=f"Text operation failed: {e}",
+            data={},
+            execution_time_ms=0,
+            error=str(e),
         ).model_dump()

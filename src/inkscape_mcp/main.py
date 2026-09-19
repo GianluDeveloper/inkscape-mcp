@@ -263,6 +263,12 @@ class InkscapeMCPServer:
             svg_content: str = "",
             params: dict[str, Any] | None = None,
             element_type: str = "",
+            object_id: str = "",
+            object_ids: list[str] | None = None,
+            select_all: bool = False,
+            operation_type: str = "",
+            threshold: float = 1.0,
+            dpi: int = 96,
         ) -> dict[str, Any]:
             """INKSCAPE_VECTOR - Vector editing, booleans, trace, QR/barcode, path ops, previews.
 
@@ -279,6 +285,12 @@ class InkscapeMCPServer:
                 svg_content: Complete SVG XML for construct_svg; no sampling is required.
                 params: For construct_svg, optional header/body/footer instead of svg_content.
                 element_type: Optional descriptive label for construct_svg.
+                object_id: Object ID for queries or edits on a single object.
+                object_ids: Object IDs for a boolean operation.
+                select_all: Select all objects for a boolean operation.
+                operation_type: Boolean operation: union, difference, intersection, exclusion.
+                threshold: Simplification threshold; native Inkscape uses its configured value.
+                dpi: Raster preview resolution.
 
             Returns:
                 Dict with success, message, data or structured results, execution_time_ms, error.
@@ -294,6 +306,12 @@ class InkscapeMCPServer:
                 svg_content=svg_content,
                 params=params,
                 element_type=element_type,
+                object_id=object_id,
+                object_ids=object_ids,
+                select_all=select_all,
+                operation_type=operation_type,
+                threshold=threshold,
+                dpi=dpi,
                 cli_wrapper=self.cli_wrapper,
                 config=self.config,
             )
@@ -570,7 +588,9 @@ class InkscapeMCPServer:
                 openWorldHint=False,
             ),
         )
-        async def inkscape_system(operation: InkscapeSystemOperation, action: str = "") -> dict[str, Any]:
+        async def inkscape_system(
+            operation: InkscapeSystemOperation, action: str = ""
+        ) -> dict[str, Any]:
             """INKSCAPE_SYSTEM - Server/Inkscape status, help, diagnostics, version, extensions.
 
             PORTMANTEAU RATIONALE: Operational and introspection calls stay in one discoverable tool.

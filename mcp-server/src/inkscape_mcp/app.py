@@ -1,10 +1,10 @@
 """
-Inkscape MCP — FastMCP 3.1 REST API Bridge
+Inkscape MCP - FastMCP 3.1 REST API Bridge
 
 /api/generate-svg pipeline:
-  1. Ollama (local RTX 4090) generates SVG XML — primary
-  2. Inkscape CLI validates & saves the SVG to disk — always
-  3. Cloud APIs (Gemini/Anthropic) — optional fallback if Ollama is unreachable
+  1. Ollama (local RTX 4090) generates SVG XML - primary
+  2. Inkscape CLI validates & saves the SVG to disk - always
+  3. Cloud APIs (Gemini/Anthropic) - optional fallback if Ollama is unreachable
 
 Environment (via .env or system):
     OLLAMA_BASE_URL     default: http://localhost:11434
@@ -17,25 +17,33 @@ Environment (via .env or system):
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import os
 import re
 import tempfile
 import threading
+import time
 from collections.abc import AsyncGenerator
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .services import llm_engine
+from .services import llm_settings_store
+
 try:
     import httpx
+    from fastapi import APIRouter
     from fastapi import FastAPI
     from fastapi import Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
     from starlette.responses import PlainTextResponse
+    from starlette.responses import Response
     from starlette.responses import StreamingResponse
     from starlette.routing import Mount
 
@@ -47,26 +55,61 @@ logger = logging.getLogger(__name__)
 
 # ── In-memory log ring (HTTP dashboard GET /api/logs) ─────────────────────────
 MAX_MEMORY_LOGS = 1000
-_memory_logs: list[dict[str, str]] = []
+_memory_logs: list[dict[str, Any]] = []
 _memory_lock = threading.Lock()
 _memory_handler: logging.Handler | None = None
+_log_id_counter = 0
 
 
 class _MemoryLogHandler(logging.Handler):
     """Capture log records for the web UI (no persistence)."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        global _log_id_counter
         try:
             msg = self.format(record)
             ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-            entry = {"timestamp": ts, "level": record.levelname, "message": msg}
+            name_lower = record.name.lower()
+            if "tool" in name_lower:
+                kind = "tool_call"
+            elif "export" in name_lower:
+                kind = "export"
+            else:
+                kind = "server"
             with _memory_lock:
+                _log_id_counter += 1
+                entry = {
+                    "id": str(_log_id_counter),
+                    "timestamp": ts,
+                    "level": record.levelname,
+                    "kind": kind,
+                    "detail": msg,
+                    "meta": {"logger": record.name},
+                }
                 _memory_logs.append(entry)
                 overflow = len(_memory_logs) - MAX_MEMORY_LOGS
                 if overflow > 0:
                     del _memory_logs[0:overflow]
         except Exception:
             self.handleError(record)
+
+
+def _filter_logs(
+    logs: list[dict[str, Any]], *, level: str = "", kind: str = "", search: str = ""
+) -> list[dict[str, Any]]:
+    if level:
+        logs = [e for e in logs if e.get("level") == level]
+    if kind:
+        logs = [e for e in logs if e.get("kind") == kind]
+    if search:
+        needle = search.lower()
+        logs = [
+            e
+            for e in logs
+            if needle in str(e.get("detail", "")).lower()
+            or needle in json.dumps(e.get("meta", {})).lower()
+        ]
+    return logs
 
 
 def _attach_memory_logging() -> None:
@@ -77,29 +120,37 @@ def _attach_memory_logging() -> None:
     _memory_handler.setLevel(logging.INFO)
     _memory_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     root = logging.getLogger()
+    # When this app is imported directly as an ASGI target (e.g. `uvicorn
+    # inkscape_mcp.server:app`, as the fleet launcher does), main.py's CLI-only
+    # logging.basicConfig() never runs, so the root logger stays at its default
+    # WARNING level and every INFO record - including this buffer's own entries -
+    # is dropped before it reaches any handler. Raise it, but never lower a level
+    # someone already configured more verbosely.
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
     root.addHandler(_memory_handler)
     logger.info("REST: memory log buffer enabled (GET/DELETE /api/logs)")
 
 
 def _help_payload() -> dict[str, Any]:
     return {
-        "title": "Inkscape MCP — help",
+        "title": "Inkscape MCP - help",
         "summary": (
             "Vector and SVG operations run through MCP tools that call the Inkscape CLI. "
             "Use Cursor, Claude Desktop, or another MCP client for natural-language workflows. "
             "This dashboard shows status, logs, and optional REST helpers."
         ),
         "tools": [
-            "inkscape_file — load, convert, info, validate, list_formats",
-            "inkscape_vector — trace, boolean, simplify, preview, QR, …",
-            "inkscape_render — export_preview, export_multi_dpi, get_document_summary",
-            "inkscape_validation — validate_svg, check_viewbox, audit_web_svg, …",
-            "inkscape_fleet — push_gimp_raster, stage_blender_svg, push_unity_sprite, run_pipeline",
-            "inkscape_fab_art — DXF/laser fab paths, Gazebo schematics, robotics staging",
-            "inkscape_sim_art — SVG icon packs, icon sheets, Resonite UI staging",
-            "inkscape_analysis — statistics, validate, dimensions",
-            "inkscape_system — status, execution_mode, help, config, diagnostics",
-            "list_local_models — optional Ollama/LM Studio discovery",
+            "inkscape_file - load, convert, info, validate, list_formats",
+            "inkscape_vector - trace, boolean, simplify, preview, QR, …",
+            "inkscape_render - export_preview, export_multi_dpi, get_document_summary",
+            "inkscape_validation - validate_svg, check_viewbox, audit_web_svg, …",
+            "inkscape_fleet - push_gimp_raster, stage_blender_svg, push_unity_sprite, run_pipeline",
+            "inkscape_fab_art - DXF/laser fab paths, Gazebo schematics, robotics staging",
+            "inkscape_sim_art - SVG icon packs, icon sheets, Resonite UI staging",
+            "inkscape_analysis - statistics, validate, dimensions",
+            "inkscape_system - status, execution_mode, help, config, diagnostics",
+            "list_local_models - optional Ollama/LM Studio discovery",
         ],
         "http_ports": {
             "vite_dev_ui": 10899,
@@ -222,7 +273,7 @@ def _extract_svg(text: str) -> str | None:
 
 
 async def _call_ollama(prompt: str, system: str) -> str:
-    """POST to Ollama /api/chat — no external API key needed."""
+    """POST to Ollama /api/chat - no external API key needed."""
     url = f"{_ollama_base()}/api/chat"
     payload = {
         "model": _ollama_model(),
@@ -286,6 +337,57 @@ async def _call_anthropic(prompt: str, system: str) -> str:
     return r.json()["content"][0]["text"]
 
 
+async def _call_gemini_chat(messages: list[dict], model: str, api_key: str) -> str:
+    """Multi-turn Gemini call for /api/chat (separate from the single-shot
+    _call_gemini used by /api/generate-svg's cloud fallback - different
+    request shapes, don't conflate the two callers)."""
+    system = "\n".join(m["content"] for m in messages if m.get("role") == "system")
+    contents = [
+        {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+        for m in messages
+        if m.get("role") in ("user", "assistant")
+    ]
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model or 'gemini-2.0-flash'}:generateContent?key={api_key}"
+    )
+    payload: dict[str, Any] = {"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": 8192}}
+    if system:
+        payload["system_instruction"] = {"parts": [{"text": system}]}
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+    candidates = r.json().get("candidates", [])
+    if not candidates:
+        return ""
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts)
+
+
+async def _call_anthropic_chat(messages: list[dict], model: str, api_key: str) -> str:
+    """Multi-turn Anthropic call for /api/chat (see _call_gemini_chat note)."""
+    system = "\n".join(m["content"] for m in messages if m.get("role") == "system")
+    turns = [{"role": m["role"], "content": m["content"]} for m in messages if m.get("role") in ("user", "assistant")]
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        r = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": model or "claude-haiku-4-5",
+                "max_tokens": 8192,
+                "system": system,
+                "messages": turns or [{"role": "user", "content": ""}],
+            },
+        )
+        r.raise_for_status()
+    content = r.json().get("content", [])
+    return "".join(c.get("text", "") for c in content if c.get("type") == "text")
+
+
 # ── Primary generation pipeline ───────────────────────────────────────────────
 
 
@@ -303,7 +405,7 @@ async def _generate_svg(
 
     user_p = _user_prompt(description, style, w, h, quality)
 
-    # 1. Ollama (local — primary)
+    # 1. Ollama (local - primary)
     try:
         raw = await _call_ollama(user_p, _SVG_SYSTEM)
         model_used = f"ollama/{_ollama_model()}"
@@ -335,7 +437,7 @@ async def _generate_svg(
             f'<rect width="{w}" height="{h}" fill="#1a1a2e"/>'
             f'<text x="{w // 2}" y="{h // 2}" text-anchor="middle" fill="#e94560" '
             f'font-family="monospace" font-size="14">'
-            f"SVG parse error — raw response length: {len(raw)} chars"
+            f"SVG parse error - raw response length: {len(raw)} chars"
             f"</text></svg>"
         )
     return svg, model_used
@@ -393,11 +495,95 @@ async def _save_via_inkscape(svg_xml: str, stem: str, inkscape_exe: str | None) 
         return None
 
 
+async def _call_mcp_tool(mcp: Any, tool_name: str, params: dict) -> dict[str, Any]:
+    """Call an MCP tool and normalize FastMCP's ToolResult into
+    {success, data, error} - shared by /v1/tool and the agentic chat
+    tool-calling loop so there is exactly one place that understands
+    to_mcp_result()'s three possible shapes.
+
+    result.to_mcp_result() returns one of:
+      - a CallToolResult (has .isError) - the only shape that actually
+        carries an error flag.
+      - a (content, structured_content) tuple - NEVER an error path per
+        FastMCP's ToolResult.to_mcp_result(); structured_content is a
+        dict, not a bool, so it must never be read as an is_error flag
+        (a truthy dict would always look like an error - this was a real
+        bug here before: every successful tool call with data reported
+        as failed).
+      - a bare content list.
+    """
+    try:
+        result = await mcp.call_tool(str(tool_name), params)
+    except Exception as exc:
+        logger.exception("Tool %s failed: %s", tool_name, exc)
+        return {"success": False, "data": None, "error": str(exc)}
+
+    mcp_result = result.to_mcp_result()
+    is_error = False
+    content_list: list[Any] = []
+    structured_content: Any = None
+    if hasattr(mcp_result, "isError"):
+        is_error = bool(mcp_result.isError)
+        content_list = getattr(mcp_result, "content", None) or []
+        structured_content = getattr(mcp_result, "structuredContent", None)
+    elif isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
+        content_list, structured_content = mcp_result[0], mcp_result[1]
+    else:
+        content_list = mcp_result if isinstance(mcp_result, list) else getattr(result, "content", [])
+
+    data: Any = structured_content
+    error_text: str | None = None
+    if content_list:
+        text = getattr(content_list[0], "text", str(content_list[0]))
+        if data is None:
+            try:
+                data = json.loads(text)
+            except Exception:
+                data = {"output": text}
+        if is_error:
+            error_text = text
+
+    return {
+        "success": not is_error and data is not None,
+        "data": data,
+        "error": None if not is_error else (error_text or "Tool returned error"),
+    }
+
+
+async def _ollama_tool_schemas(mcp: Any) -> list[dict[str, Any]]:
+    """Ollama-format (OpenAI-style) function-tool schemas for every
+    registered MCP tool, so the chat tool-calling loop and MCP clients
+    expose the same surface - reuses list_tools(), the same call /api/health
+    already makes for its tool_count."""
+    try:
+        raw_tools = await mcp.list_tools()
+    except Exception:
+        logger.warning("list_tools() failed while building chat tool schemas", exc_info=True)
+        return []
+    schemas: list[dict[str, Any]] = []
+    for t in raw_tools:
+        try:
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": (t.description or "")[:1000],
+                        "parameters": t.parameters,
+                    },
+                }
+            )
+        except Exception:
+            continue
+    return schemas
+
+
 # ── Streaming chat helpers ────────────────────────────────────────────────────
 
 
 class _AgenticEvent:
     """SSE event types for streaming chat."""
+
     TEXT = "text"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -405,11 +591,24 @@ class _AgenticEvent:
 
 
 async def _stream_ollama_raw(
-    client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
-) -> AsyncGenerator[str, None]:
+    client: httpx.AsyncClient,
+    endpoint: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yields ("text", chunk) for content deltas, or ("tool_calls", list)
+    once when the model wants to call tools instead of answering. Ollama
+    delivers tool_calls on the final streamed line (done=true), not
+    incrementally piece by piece the way OpenAI-style deltas work - so this
+    stops yielding text and returns as soon as a line carries them."""
+    payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+    if tools:
+        payload["tools"] = tools
     async with client.stream(
-        "POST", f"{endpoint}/api/chat",
-        json={"model": model, "messages": messages, "stream": True},
+        "POST",
+        f"{endpoint}/api/chat",
+        json=payload,
         timeout=120,
     ) as r:
         async for line in r.aiter_lines():
@@ -417,18 +616,27 @@ async def _stream_ollama_raw(
                 continue
             try:
                 data = json.loads(line)
-                chunk = data.get("message", {}).get("content", "")
-                if chunk:
-                    yield chunk
             except json.JSONDecodeError:
-                pass
+                continue
+            msg = data.get("message") or {}
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                yield ("tool_calls", tool_calls)
+                return
+            chunk = msg.get("content", "")
+            if chunk:
+                yield ("text", chunk)
 
 
 async def _stream_lmstudio_raw(
     client: httpx.AsyncClient, endpoint: str, model: str, messages: list[dict]
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yields ("text", chunk) tuples - same tagged shape as
+    _stream_ollama_raw for a uniform caller, though LM Studio never yields
+    ("tool_calls", ...): tool calling is Ollama-only here (see _event_stream)."""
     async with client.stream(
-        "POST", f"{endpoint}/v1/chat/completions",
+        "POST",
+        f"{endpoint}/v1/chat/completions",
         json={"messages": messages, "model": model, "temperature": 0.7, "stream": True},
         timeout=120,
     ) as r:
@@ -442,7 +650,7 @@ async def _stream_lmstudio_raw(
                 data = json.loads(chunk)
                 delta = data["choices"][0].get("delta", {}).get("content", "")
                 if delta:
-                    yield delta
+                    yield ("text", delta)
             except json.JSONDecodeError:
                 pass
 
@@ -453,10 +661,10 @@ async def _stream_lmstudio_raw(
 def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     """Attach /api/* REST layer to the FastMCP 3.1 HTTP server."""
     if not FASTAPI_AVAILABLE:
-        logger.warning("fastapi/httpx not installed — REST API bridge unavailable.")
+        logger.warning("fastapi/httpx not installed - REST API bridge unavailable.")
         return
     if not hasattr(mcp, "_additional_http_routes"):
-        logger.warning("FastMCP has no _additional_http_routes — REST bridge unavailable.")
+        logger.warning("FastMCP has no _additional_http_routes - REST bridge unavailable.")
         return
 
     # Grab Inkscape path from config if available
@@ -486,12 +694,66 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
 
     _attach_memory_logging()
 
+    from .services.apps_routes import register_apps_routes
+
+    _apps_router = APIRouter(prefix="/api")
+    register_apps_routes(_apps_router)
+    app.include_router(_apps_router)
+
     @app.get("/api/logs")
-    async def api_logs(limit: int = 400) -> dict:
+    async def api_logs(
+        limit: int = 400,
+        offset: int = 0,
+        level: str = "",
+        kind: str = "",
+        search: str = "",
+        sort: str = "desc",
+        after_id: str = "",
+    ) -> dict:
         limit = max(1, min(limit, MAX_MEMORY_LOGS))
         with _memory_lock:
-            tail = _memory_logs[-limit:]
-        return {"logs": tail, "returned": len(tail), "total": len(_memory_logs)}
+            logs = list(_memory_logs)
+        logs = _filter_logs(logs, level=level, kind=kind, search=search)
+
+        if after_id:
+            idx = next((i for i, e in enumerate(logs) if e.get("id") == after_id), None)
+            tail = logs[idx + 1 :] if idx is not None else []
+            return {"logs": tail, "returned": len(tail), "total": len(logs)}
+
+        total = len(logs)
+        ordered = list(reversed(logs)) if sort != "asc" else logs
+        page = ordered[offset : offset + limit]
+        return {"logs": page, "returned": len(page), "total": total}
+
+    @app.get("/api/logs/export")
+    async def api_logs_export(
+        format: str = "json",
+        level: str = "",
+        kind: str = "",
+        search: str = "",
+    ) -> Response:
+        with _memory_lock:
+            logs = list(_memory_logs)
+        logs = _filter_logs(logs, level=level, kind=kind, search=search)
+
+        if format == "csv":
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["id", "timestamp", "level", "kind", "detail"])
+            for e in logs:
+                writer.writerow(
+                    [e.get("id", ""), e.get("timestamp", ""), e.get("level", ""), e.get("kind", ""), e.get("detail", "")]
+                )
+            return Response(
+                content=buf.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": 'attachment; filename="logs.csv"'},
+            )
+
+        return JSONResponse(
+            {"logs": logs, "total": len(logs)},
+            headers={"Content-Disposition": 'attachment; filename="logs.json"'},
+        )
 
     @app.delete("/api/logs")
     async def api_logs_clear() -> dict:
@@ -530,7 +792,7 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             payload = {}
         query = str(payload.get("query") or payload.get("message", ""))
         provider = str(payload.get("provider") or "ollama")
-        model = str(payload.get("model") or "qwen2.5-coder:latest")
+        model = str(payload.get("model") or "")
         endpoint = str(payload.get("endpoint") or _ollama_base()).rstrip("/")
         system_prompt = str(payload.get("system_prompt", ""))
         stream = bool(payload.get("stream", False))
@@ -539,10 +801,21 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         if not isinstance(history, list):
             history = []
 
-        logger.info("REST: /api/chat (query=%r, provider=%s, stream=%s, mode=%s)", query[:60], provider, stream, mode)
+        logger.info(
+            "REST: /api/chat (query=%r, provider=%s, stream=%s, mode=%s)",
+            query[:60],
+            provider,
+            stream,
+            mode,
+        )
 
         if not query:
             return {"reply": "", "status": "error"}
+
+        # SETTINGS_LLM.md rule 6: send-time guard. No fallback model, ever -
+        # an empty selection means the user hasn't picked one in Settings yet.
+        if not model:
+            return {"reply": "Pick a model in Settings before chatting.", "status": "error"}
 
         if not stream:
             return {"reply": "Streaming is required for chat. Set stream=true.", "status": "error"}
@@ -555,14 +828,94 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 msgs.append({"role": h.get("role", "user"), "content": h.get("content", "")})
             msgs.append({"role": "user", "content": query})
 
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                if provider == "lmstudio":
-                    generator = _stream_lmstudio_raw(client, endpoint, model, msgs)
-                else:
-                    generator = _stream_ollama_raw(client, endpoint, model, msgs)
+            if provider in ("gemini", "anthropic"):
+                api_key = llm_settings_store.get_key(provider)
+                if not api_key:
+                    yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': f'No API key configured for {provider}. Add one in AI Settings.'})}\n\n"
+                    yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
+                    return
+                try:
+                    caller = _call_gemini_chat if provider == "gemini" else _call_anthropic_chat
+                    text = await caller(msgs, model, api_key)
+                except Exception as exc:
+                    text = f"{provider} request failed: {exc}"
+                yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': text})}\n\n"
+            else:
+                # Agentic tool-calling loop (Ollama only - it's the only
+                # provider here whose streaming API surfaces tool_calls;
+                # LM Studio's OpenAI-style streaming would need incremental
+                # partial-JSON delta assembly across chunks, a materially
+                # different and harder problem, not implemented). This is
+                # what chat.tsx's tool_call/tool_result SSE handling and its
+                # tool-call cards were originally built for but never
+                # received - _AgenticEvent.TOOL_CALL was defined and the
+                # frontend UI built around it, but nothing server-side ever
+                # yielded one.
+                tools_schema = await _ollama_tool_schemas(mcp) if provider == "ollama" else None
+                max_rounds = 4
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    for _round in range(max_rounds):
+                        pending_tool_calls: list[dict] | None = None
+                        generator = (
+                            _stream_lmstudio_raw(client, endpoint, model, msgs)
+                            if provider == "lmstudio"
+                            else _stream_ollama_raw(client, endpoint, model, msgs, tools=tools_schema or None)
+                        )
+                        async for kind, item in generator:
+                            if kind == "text":
+                                yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': item})}\n\n"
+                            elif kind == "tool_calls":
+                                pending_tool_calls = item
 
-                async for chunk in generator:
-                    yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': chunk})}\n\n"
+                        if not pending_tool_calls:
+                            break
+
+                        msgs.append({"role": "assistant", "content": "", "tool_calls": pending_tool_calls})
+                        for tc in pending_tool_calls:
+                            fn = (tc or {}).get("function") or {}
+                            tool_name = str(fn.get("name") or "")
+                            raw_args = fn.get("arguments")
+                            if isinstance(raw_args, str):
+                                try:
+                                    args = json.loads(raw_args) if raw_args else {}
+                                except Exception:
+                                    args = {}
+                            elif isinstance(raw_args, dict):
+                                args = raw_args
+                            else:
+                                args = {}
+
+                            nl_name = tool_name.replace("_", " ").title() or "Tool"
+                            yield f"data: {json.dumps({'type': _AgenticEvent.TOOL_CALL, 'tool': tool_name, 'nl_name': nl_name})}\n\n"
+
+                            t0 = time.monotonic()
+                            if tool_name:
+                                outcome = await _call_mcp_tool(mcp, tool_name, args)
+                            else:
+                                outcome = {"success": False, "data": None, "error": "model returned an empty tool name"}
+                            timing_ms = round((time.monotonic() - t0) * 1000, 1)
+
+                            result_obj = {
+                                "success": outcome["success"],
+                                "tool": tool_name,
+                                "params": args,
+                                "result": json.dumps(outcome["data"]) if outcome["success"] else None,
+                                "error": None if outcome["success"] else (outcome["error"] or "Tool failed"),
+                                "timing_ms": timing_ms,
+                            }
+                            yield f"data: {json.dumps({'type': _AgenticEvent.TOOL_RESULT, 'tool': tool_name, 'result': result_obj})}\n\n"
+
+                            msgs.append(
+                                {
+                                    "role": "tool",
+                                    "tool_name": tool_name,
+                                    "content": json.dumps(
+                                        outcome["data"] if outcome["success"] else {"error": outcome["error"]}
+                                    ),
+                                }
+                            )
+                    else:
+                        yield f"data: {json.dumps({'type': _AgenticEvent.TEXT, 'content': '(stopped after several tool calls without a final answer - try rephrasing)'})}\n\n"
 
             yield f"data: {json.dumps({'type': _AgenticEvent.DONE})}\n\n"
 
@@ -576,43 +929,203 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             },
         )
 
-    # ── /api/llm/providers (auto-discovery for webapp chat settings) ─────────
-    @app.get("/api/llm/providers")
-    async def llm_providers() -> dict:
-        providers: list[dict] = []
-        # Ollama
-        ollama_ok = False
-        ollama_models: list[str] = []
+    # ── /api/llm/* (SETTINGS_LLM.md contract: local + cloud, no-auto-pick) ────
+    _cloud_providers = {
+        "gemini": {"label": "Gemini", "base_url": "https://generativelanguage.googleapis.com"},
+        "anthropic": {"label": "Anthropic", "base_url": "https://api.anthropic.com"},
+    }
+    # Curated fallback lists - these two providers have no cheap "list models"
+    # endpoint worth calling on every provider probe, unlike Ollama/LM Studio.
+    _cloud_curated_models = {
+        "gemini": ["gemini-2.0-flash", "gemini-2.5-pro"],
+        "anthropic": ["claude-haiku-4-5", "claude-sonnet-4-5"],
+    }
+
+    async def _probe_ollama() -> tuple[bool, list[str]]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get(f"{_ollama_base()}/api/tags")
                 if r.status_code == 200:
-                    ollama_models = [m["name"] for m in r.json().get("models", [])]
-                    ollama_ok = True
+                    return True, [m["name"] for m in r.json().get("models", [])]
         except Exception:
             pass
-        providers.append({
-            "type": "ollama",
-            "base_url": _ollama_base(),
-            "models": ollama_models,
-            "reachable": ollama_ok,
-        })
-        # LM Studio
-        lm_ok = False
+        return False, []
+
+    async def _probe_lmstudio() -> tuple[bool, list[str]]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
                 r = await c.get("http://127.0.0.1:1234/v1/models")
                 if r.status_code == 200:
-                    lm_ok = True
+                    return True, [m["id"] for m in r.json().get("data", [])]
         except Exception:
             pass
-        providers.append({
-            "type": "lmstudio",
-            "base_url": "http://127.0.0.1:1234",
-            "models": [],
-            "reachable": lm_ok,
-        })
+        return False, []
+
+    @app.get("/api/llm/providers")
+    async def llm_providers() -> dict:
+        ollama_ok, ollama_models = await _probe_ollama()
+        lm_ok, lm_models = await _probe_lmstudio()
+        providers: list[dict] = [
+            {
+                "id": "ollama",
+                "label": "Ollama",
+                "kind": "local",
+                "base_url": _ollama_base(),
+                "needs_key": False,
+                "key_env": None,
+                "configured": True,
+                "detected": ollama_ok,
+                "models": ollama_models,
+            },
+            {
+                "id": "lmstudio",
+                "label": "LM Studio",
+                "kind": "local",
+                "base_url": "http://127.0.0.1:1234",
+                "needs_key": False,
+                "key_env": None,
+                "configured": True,
+                "detected": lm_ok,
+                "models": lm_models,
+            },
+        ]
+        for pid, info in _cloud_providers.items():
+            providers.append(
+                {
+                    "id": pid,
+                    "label": info["label"],
+                    "kind": "cloud",
+                    "base_url": info["base_url"],
+                    "needs_key": True,
+                    "key_env": llm_settings_store.KEY_ENV.get(pid),
+                    "configured": llm_settings_store.has_key(pid),
+                    "models": _cloud_curated_models.get(pid, []),
+                }
+            )
         return {"providers": providers}
+
+    @app.get("/api/llm/models")
+    async def llm_models(provider: str = "ollama") -> dict:
+        if provider == "ollama":
+            _, models = await _probe_ollama()
+            return {"provider": provider, "models": models, "source": "live" if models else "none"}
+        if provider == "lmstudio":
+            _, models = await _probe_lmstudio()
+            return {"provider": provider, "models": models, "source": "live" if models else "none"}
+        curated = _cloud_curated_models.get(provider, [])
+        return {"provider": provider, "models": curated, "source": "curated" if curated else "none"}
+
+    @app.get("/api/llm/gpus")
+    async def llm_gpus() -> dict:
+        return {"gpus": llm_engine.gpu_vram()}
+
+    @app.get("/api/llm/loaded")
+    async def llm_loaded(provider: str = "ollama", endpoint: str = "") -> dict:
+        if provider != "ollama":
+            return {"success": True, "engine": False, "models": []}
+        data = await llm_engine.ollama_loaded(endpoint or _ollama_base())
+        return {"success": True, **data}
+
+    @app.post("/api/llm/unload")
+    async def llm_unload(request: Request) -> dict:
+        payload = await request.json()
+        provider = str(payload.get("provider") or "ollama")
+        endpoint = str(payload.get("endpoint") or "") or _ollama_base()
+        if provider != "ollama":
+            return {"success": False, "evicted": []}
+        result = await llm_engine.switch_ollama_model("", endpoint)
+        return {"success": True, "evicted": result["evicted"]}
+
+    @app.get("/api/settings/llm")
+    async def get_llm_settings() -> dict:
+        data = llm_settings_store.load_settings()
+        return {
+            "provider": data.get("provider"),
+            "endpoint": data.get("endpoint"),
+            "model": data.get("model"),
+        }
+
+    @app.post("/api/settings/llm")
+    async def save_llm_settings(request: Request) -> dict:
+        payload = await request.json()
+        provider = str(payload.get("provider") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        endpoint = payload.get("endpoint")
+        api_key = payload.get("api_key")
+        if not provider:
+            return JSONResponse({"success": False, "error": "provider required"}, status_code=400)
+
+        llm_settings_store.save_settings(provider, endpoint, model)
+        key_saved = False
+        if api_key:
+            llm_settings_store.save_key(provider, str(api_key))
+            key_saved = True
+
+        result: dict[str, Any] = {"success": True}
+        if key_saved:
+            result["key_saved"] = True
+        # Save switches VRAM, not just config (SETTINGS_LLM.md rule 4) - only
+        # meaningful for the local Ollama engine.
+        if provider == "ollama":
+            switch = await llm_engine.switch_ollama_model(model, endpoint or _ollama_base())
+            result["switch"] = switch
+        return result
+
+    @app.delete("/api/settings/llm/key")
+    async def delete_llm_key(provider: str) -> dict:
+        llm_settings_store.clear_key(provider)
+        return {"success": True}
+
+    @app.get("/api/llm/onboarding")
+    async def llm_onboarding() -> dict:
+        ollama_ok, ollama_models = await _probe_ollama()
+        lm_ok, _ = await _probe_lmstudio()
+        locals_ = [
+            {"id": "ollama", "label": "Ollama", "port": 11434},
+            {"id": "lmstudio", "label": "LM Studio", "port": 1234},
+        ]
+        clouds_configured = [pid for pid in _cloud_providers if llm_settings_store.has_key(pid)]
+        if ollama_ok:
+            recommendation = {"path": "local:ollama", "reason": f"Ollama detected with {len(ollama_models)} model(s) - free, local, no key needed."}
+        elif lm_ok:
+            recommendation = {"path": "local:lmstudio", "reason": "LM Studio detected - free, local, no key needed."}
+        elif clouds_configured:
+            recommendation = {"path": f"cloud:{clouds_configured[0]}", "reason": "A cloud key is already configured."}
+        else:
+            recommendation = {"path": "cloud:gemini", "reason": "No local engine detected. Gemini has the cheapest instant path if you'd rather not install anything."}
+        return {"locals": locals_, "clouds_configured": clouds_configured, "recommendation": recommendation}
+
+    _install_state: dict[str, dict[str, Any]] = {}
+
+    @app.post("/api/llm/install")
+    async def llm_install(request: Request) -> dict:
+        payload = await request.json()
+        engine = str(payload.get("engine") or "")
+        if engine != "ollama":
+            return {"engine": engine, "started": False, "reason": "only 'ollama' is installable from here"}
+        _install_state["ollama"] = {"state": "running", "output": ""}
+
+        async def _run() -> None:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "winget", "install", "-e", "--id", "Ollama.Ollama",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                )
+                out, _ = await proc.communicate()
+                _install_state["ollama"] = {
+                    "state": "done" if proc.returncode == 0 else "error",
+                    "output": (out or b"").decode(errors="replace")[-2000:],
+                }
+            except Exception as exc:
+                _install_state["ollama"] = {"state": "error", "output": str(exc)}
+
+        asyncio.create_task(_run())
+        return {"engine": engine, "started": True}
+
+    @app.get("/api/llm/install/status")
+    async def llm_install_status(engine: str = "ollama") -> dict:
+        st = _install_state.get(engine, {"state": "idle", "output": ""})
+        return {"engine": engine, **st}
 
     # ── /api/health ──────────────────────────────────────────────────────────
     @app.get("/api/health")
@@ -649,10 +1162,16 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
         tool_groups: list[dict[str, Any]] = []
         try:
             from inkscape_mcp.tools import PORTMANTEAU_TOOLS
+
             for pt in PORTMANTEAU_TOOLS:
-                tool_groups.append({"name": pt["name"], "category": pt.get("category", pt["name"]),
-                                    "operations": pt.get("operations", []),
-                                    "op_count": len(pt.get("operations", []))})
+                tool_groups.append(
+                    {
+                        "name": pt["name"],
+                        "category": pt.get("category", pt["name"]),
+                        "operations": pt.get("operations", []),
+                        "op_count": len(pt.get("operations", [])),
+                    }
+                )
         except Exception:
             pass
 
@@ -689,7 +1208,8 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     async def diagnostics() -> dict:
         tools = []
         try:
-            tools = [{"name": t.name} for t in await mcp.list_tools()]
+            raw = await mcp.list_tools()
+            tools = [{"name": t.name} for t in raw]
         except Exception:
             pass
         return {
@@ -701,6 +1221,24 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
             "tools": tools,
             "system": {"windows": True},
             "errors": [],
+        }
+
+    # ── /api/v1/system/info (CUA-NSIS feature smoke test) ────────────────
+    @app.get("/api/v1/system/info")
+    async def system_info() -> dict:
+        tools = []
+        try:
+            raw = await mcp.list_tools()
+            tools = [{"name": t.name} for t in raw]
+        except Exception:
+            pass
+        return {
+            "status": "ok",
+            "server": "inkscape-mcp",
+            "version": "2.6.0",
+            "tool_count": len(tools),
+            "tools": tools,
+            "system": {"windows": True},
         }
 
     # ── /api/generate-svg ────────────────────────────────────────────────────
@@ -787,52 +1325,25 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
                 status_code=400,
             )
 
-        try:
-            result = await mcp.call_tool(str(tool_name), params)
-        except Exception as exc:
-            logger.exception("Tool %s failed: %s", tool_name, exc)
-            return JSONResponse(
-                {"success": False, "error": str(exc), "data": None},
-                status_code=500,
-            )
-
-        mcp_result = result.to_mcp_result()
-        is_error = False
-        content_list: list[Any] = []
-        if isinstance(mcp_result, tuple) and len(mcp_result) >= 2:
-            content_list = mcp_result[0]
-            is_error = mcp_result[1]
-        else:
-            content_list = getattr(result, "content", [])
-
-        data: Any = None
-        if content_list:
-            text = getattr(content_list[0], "text", str(content_list[0]))
-            try:
-                data = json.loads(text)
-            except Exception:
-                data = {"output": text}
-
-        return JSONResponse(
-            {
-                "success": not is_error and data is not None,
-                "data": data,
-                "error": None if not is_error else "Tool returned error",
-            }
-        )
+        outcome = await _call_mcp_tool(mcp, str(tool_name), params)
+        return JSONResponse(outcome)
 
     # ── /api/skills ──────────────────────────────────────────────────────────
     @app.get("/api/skills")
     async def list_skills():
         return {
             "skills": [
-                {"name": "inkscape", "description": "Inkscape vector graphics skill — SVG creation, editing, analysis, and export"},
+                {
+                    "name": "inkscape",
+                    "description": "Inkscape vector graphics skill - SVG creation, editing, analysis, and export",
+                },
             ]
         }
 
     @app.get("/api/skills/{skill_name}")
     async def get_skill(skill_name: str):
         from pathlib import Path as _Path  # noqa: PLC0415
+
         skill_path = _Path(__file__).parent / "skills" / "SKILL.md"
         if not skill_path.exists():
             return {"ok": False, "error": "not found"}
@@ -844,7 +1355,12 @@ def register_rest_api(mcp: Any, config: Any | None = None) -> None:
     async def fleet_overview():
         return {
             "ships": [
-                {"name": "inkscape-mcp", "port": 11028, "status": "running", "category": "Graphics"},
+                {
+                    "name": "inkscape-mcp",
+                    "port": 11028,
+                    "status": "running",
+                    "category": "Graphics",
+                },
                 {"name": "gimp-mcp", "port": 10772, "status": "unknown", "category": "Graphics"},
                 {"name": "blender-mcp", "port": 10848, "status": "unknown", "category": "3D"},
                 {"name": "kicad-mcp", "port": 11016, "status": "unknown", "category": "EDA"},

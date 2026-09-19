@@ -447,6 +447,28 @@ async def inkscape_vector(
     }
 
     try:
+        file_edit_operations = {
+            "trace_image",
+            "apply_boolean",
+            "path_simplify",
+            "path_clean",
+            "path_combine",
+            "path_break_apart",
+            "path_inset_outset",
+            "object_to_path",
+            "object_raise",
+            "object_lower",
+            "text_to_path",
+            "optimize_svg",
+            "scour_svg",
+            "export_dxf",
+            "render_preview",
+            "fit_canvas_to_drawing",
+            "set_document_units",
+        }
+        if operation in file_edit_operations and (not input_path or not output_path):
+            raise ValueError(f"input_path and output_path are required for {operation}")
+
         if operation == "trace_image":
             return await _trace_image(input_path, output_path, cli_wrapper, config)
 
@@ -525,7 +547,9 @@ async def inkscape_vector(
             return await _text_to_path(input_path, output_path, object_id, cli_wrapper, config)
 
         elif operation == "construct_svg":
-            return await _construct_svg(output_path, element_type, params or {}, config, svg_content)
+            return await _construct_svg(
+                output_path, element_type, params or {}, config, svg_content
+            )
 
         elif operation == "path_inset_outset":
             return await _path_inset_outset(
@@ -593,13 +617,15 @@ async def _trace_image(
     input_path: str, output_path: str, cli_wrapper: Any, config: Any
 ) -> dict[str, Any]:
     """Trace bitmap image to vector paths using potrace."""
+    start_time = time.perf_counter()
     try:
         actions = [
-            "file-open:" + input_path,
-            "selection-create-bitmap-copies",
-            "selection-trace",
-            "file-save-as:" + output_path,
-            "file-close",
+            # The input document is already opened by the wrapper. Lifecycle
+            # actions can switch/close it before the export has completed.
+            "select-by-element:image",
+            "object-trace:8,true,true,false,2,1,0.2",
+            "export-type:svg",
+            "export-do",
         ]
 
         await cli_wrapper._execute_actions(
@@ -614,7 +640,7 @@ async def _trace_image(
             operation="trace_image",
             message=f"Traced bitmap {input_path} to vector {output_path}",
             data={"input_path": input_path, "output_path": output_path, "method": "potrace"},
-            execution_time_ms=(time.time() - time.time()) * 1000,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
         ).model_dump()
 
     except Exception as e:
@@ -623,7 +649,7 @@ async def _trace_image(
             operation="trace_image",
             message=f"Bitmap tracing failed: {e}",
             data={},
-            execution_time_ms=0,
+            execution_time_ms=(time.perf_counter() - start_time) * 1000,
             error=str(e),
         ).model_dump()
 
@@ -978,12 +1004,15 @@ async def _path_simplify(
     cli_wrapper: Any,
     config: Any,
 ) -> dict[str, Any]:
-    """Simplify path by reducing nodes."""
+    """Simplify path by reducing nodes with Inkscape's configured threshold."""
     try:
+        if not math.isfinite(threshold) or threshold <= 0:
+            raise ValueError("threshold must be a finite positive number")
+        if not object_id:
+            raise ValueError("object_id is required for path_simplify")
         actions = [
             f"select-by-id:{object_id}",
-            f"selection-simplify:{threshold}",
-            f"export-filename:{output_path}",
+            "path-simplify",
             "export-do",
         ]
 
@@ -1003,6 +1032,7 @@ async def _path_simplify(
                 "output_path": output_path,
                 "object_id": object_id,
                 "threshold": threshold,
+                "note": "Inkscape uses its configured simplification threshold; the CLI action accepts no threshold argument.",
             },
             execution_time_ms=(time.time() - time.time()) * 1000,
         ).model_dump()
@@ -1024,9 +1054,6 @@ async def _path_clean(
     """Clean SVG by removing unnecessary elements."""
     try:
         actions = [
-            "file-vacuum-defs",
-            "file-cleanup",
-            f"export-filename:{output_path}",
             "export-do",
         ]
 
@@ -1035,6 +1062,7 @@ async def _path_clean(
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
+            vacuum_defs=True,
         )
 
         return VectorOperationResult(
@@ -1065,8 +1093,7 @@ async def _export_dxf(
     """Export SVG paths to DXF for CAD/laser workflows."""
     try:
         actions = [
-            f"export-filename:{output_path}",
-            "export-type:DXF",
+            "export-type:dxf",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1104,7 +1131,7 @@ async def _render_preview(
     start_time = time.perf_counter()
     cli_output = ""
     try:
-        actions = ["export-type:png", f"export-filename:{output_path}", f"export-dpi:{dpi}", "export-do"]
+        actions = ["export-type:png", f"export-dpi:{dpi}", "export-do"]
 
         cli_output = await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1159,6 +1186,8 @@ async def _apply_boolean(
         if select_all:
             select_action = "select-all"
         elif object_ids:
+            if len(set(object_ids)) < 2:
+                raise ValueError("Boolean operations require at least two distinct object IDs")
             select_action = f"select-by-id:{','.join(object_ids)}"
         else:
             return VectorOperationResult(
@@ -1172,10 +1201,10 @@ async def _apply_boolean(
 
         # Map operation types to Inkscape actions
         operation_map = {
-            "union": "selection-union",
-            "difference": "selection-difference",
-            "intersection": "selection-intersection",
-            "exclusion": "selection-exclusion",
+            "union": "path-union",
+            "difference": "path-difference",
+            "intersection": "path-intersection",
+            "exclusion": "path-exclusion",
         }
 
         if boolean_type not in operation_map:
@@ -1191,7 +1220,7 @@ async def _apply_boolean(
         operation_action = operation_map[boolean_type]
 
         # MANDATORY: Complete action chain with export for persistence
-        actions = f"{select_action};{operation_action};export-filename:{output_path};export-do"
+        actions = f"{select_action};{operation_action};export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1231,9 +1260,7 @@ async def _object_raise(
 ) -> dict[str, Any]:
     """Raise object in Z-order (move up)."""
     try:
-        actions = (
-            f"select-by-id:{object_id};selection-raise;export-filename:{output_path};export-do"
-        )
+        actions = f"select-by-id:{object_id};selection-raise;export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1270,9 +1297,7 @@ async def _object_lower(
 ) -> dict[str, Any]:
     """Lower object in Z-order (move down)."""
     try:
-        actions = (
-            f"select-by-id:{object_id};selection-lower;export-filename:{output_path};export-do"
-        )
+        actions = f"select-by-id:{object_id};selection-lower;export-do"
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
@@ -1310,8 +1335,7 @@ async def _set_document_units(
     """Set document units via export-filename/export-type:SVG with viewBox adjustment."""
     try:
         actions = [
-            f"export-filename:{output_path}",
-            "export-type:SVG",
+            "export-type:svg",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1465,7 +1489,7 @@ async def _text_to_path(
     """Convert text objects to paths via Inkscape actions."""
     try:
         select = f"select-by-id:{object_id}" if object_id else "select-by-element:text"
-        actions = [select, "object-to-path", f"export-filename:{output_path}", "export-do"]
+        actions = [select, "object-to-path", "export-do"]
         await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
@@ -1505,7 +1529,9 @@ async def _construct_svg(
         if path.suffix.lower() != ".svg":
             raise ValueError("output_path must have an .svg extension")
         allowed = getattr(config, "allowed_directories", []) or []
-        if allowed and not any(path.is_relative_to(Path(p).expanduser().resolve()) for p in allowed):
+        if allowed and not any(
+            path.is_relative_to(Path(p).expanduser().resolve()) for p in allowed
+        ):
             raise ValueError("output_path is outside allowed_directories")
         if not svg_content.strip():
             body = params.get("body", "")
@@ -1555,7 +1581,6 @@ async def _path_inset_outset(
         actions = [
             "select-all",
             f"{action}:{amount}",
-            f"export-filename:{output_path}",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1595,7 +1620,7 @@ async def _path_combine(
 ) -> dict[str, Any]:
     """Combine selected paths into a single path."""
     try:
-        actions = ["select-all", "path-combine", f"export-filename:{output_path}", "export-do"]
+        actions = ["select-all", "path-combine", "export-do"]
         await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
@@ -1628,7 +1653,7 @@ async def _path_break_apart(
 ) -> dict[str, Any]:
     """Break apart a compound path into individual paths."""
     try:
-        actions = ["select-all", "path-break-apart", f"export-filename:{output_path}", "export-do"]
+        actions = ["select-all", "path-break-apart", "export-do"]
         await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
@@ -1663,7 +1688,7 @@ async def _object_to_path(
     """Convert a shape object (rect, circle, star, text) to paths."""
     try:
         select = f"select-by-id:{object_id}" if object_id else "select-all"
-        actions = [select, "object-to-path", f"export-filename:{output_path}", "export-do"]
+        actions = [select, "object-to-path", "export-do"]
         await cli_wrapper._execute_actions(
             input_path=input_path,
             actions=actions,
@@ -1697,9 +1722,6 @@ async def _optimize_svg(
     """Optimize SVG by vacuuming unused defs and cleaning up."""
     try:
         actions = [
-            "file-vacuum-defs",
-            "file-cleanup",
-            f"export-filename:{output_path}",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1707,6 +1729,7 @@ async def _optimize_svg(
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
+            vacuum_defs=True,
         )
         return VectorOperationResult(
             success=True,
@@ -1735,12 +1758,9 @@ async def _scour_svg(
     """Aggressive SVG cleanup: vacuum defs, strip IDs, remove metadata."""
     try:
         actions = [
-            "file-vacuum-defs",
-            "file-cleanup",
             "select-all",
-            "selection-unlink-recursive",
-            f"export-filename:{output_path}",
-            "export-type:SVG",
+            "object-unlink-clones",
+            "export-type:svg",
             "export-plain-svg",
             "export-do",
         ]
@@ -1749,6 +1769,7 @@ async def _scour_svg(
             actions=actions,
             output_path=output_path,
             timeout=config.process_timeout,
+            vacuum_defs=True,
         )
         return VectorOperationResult(
             success=True,
@@ -1779,7 +1800,6 @@ async def _fit_canvas_to_drawing(
         actions = [
             "select-all",
             "fit-canvas-to-selection",
-            f"export-filename:{output_path}",
             "export-do",
         ]
         await cli_wrapper._execute_actions(
@@ -1837,8 +1857,7 @@ async def _layers_to_files(
             out_file = out_dir / f"{lid}.svg"
             actions = [
                 f"select-by-id:{lid}",
-                f"export-filename:{out_file}",
-                "export-type:SVG",
+                "export-type:svg",
                 "export-do",
             ]
             try:
@@ -1948,7 +1967,7 @@ async def _lpe_handler(
         actions = [select, effect_verb]
         if param_str:
             actions.append(f"lpe-param-set:{param_str}")
-        actions.extend([f"export-filename:{output_path}", "export-do"])
+        actions.extend(["export-do"])
 
         await cli_wrapper._execute_actions(
             input_path=input_path,
