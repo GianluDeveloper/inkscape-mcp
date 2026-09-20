@@ -6,7 +6,7 @@ full functionality and improving discoverability. Follows FastMCP 2.14.1+ SOTA s
 
 SUPPORTED OPERATIONS:
 - load: Load and validate SVG files
-- save: Save SVG files with formatting options
+- save: Export an existing file on disk as SVG
 - convert: Convert between vector formats
 - info: Get comprehensive file metadata and statistics
 - validate: Validate SVG structure and syntax
@@ -16,7 +16,7 @@ OPERATIONS DETAIL:
 
 **File Management (CRUD)**:
   - load: Validates SVG syntax and basic structure, returns dimensions and file metadata
-  - save: Writes SVG with optional formatting and structure validation
+  - save: Exports the source file on disk to an SVG destination
   - convert: Transforms between vector formats using Inkscape export functionality
 
 **Analysis & Discovery**:
@@ -28,7 +28,7 @@ Args:
     operation (Literal, required): The file operation to perform. Must be one of:
         "load", "save", "convert", "info", "validate", "list_formats".
         - "load": Load SVG file and validate structure (requires: input_path)
-        - "save": Save SVG with options (requires: input_path, output_path)
+        - "save": Export an existing file as SVG (requires: input_path, output_path)
         - "convert": Convert between formats (requires: input_path, output_path, format)
         - "info": Get file metadata (requires: input_path)
         - "validate": Validate SVG structure (requires: input_path)
@@ -120,7 +120,7 @@ Examples:
         operation="list_formats"
     )
 
-    # Save SVG with formatting
+    # Export a saved file as SVG
     result = await inkscape_file(
         operation="save",
         input_path="source.svg",
@@ -189,10 +189,21 @@ async def inkscape_file(
     cli_wrapper: Any = None,
     config: Any = None,
 ) -> dict[str, Any]:
-    """Inkscape file operations portmanteau tool."""
+    """Operate on files on disk; save exports input_path to output_path as SVG.
+
+    Save unsaved GUI edits through inkscape_system with operation save_document
+    or save_copy and the intended session_id.
+    """
     start_time = time.time()
 
     try:
+        if operation == "save" and not input_path.strip():
+            raise ValueError(
+                "inkscape_file save requires input_path for an existing file on disk. "
+                "To save unsaved GUI edits, use inkscape_system with operation='save_document' "
+                "and the intended session_id, or operation='save_copy' with output_path "
+                "to export a live copy."
+            )
         input_path_obj = Path(input_path)
         if operation in {"load", "save", "convert", "info", "validate"}:
             if not input_path or not input_path_obj.is_file():
@@ -276,7 +287,11 @@ async def inkscape_file(
                 return FileOperationResult(
                     success=True,
                     operation=operation,
-                    message=f"{'Saved' if operation == 'save' else 'Converted'} {input_path} to {output_path}",
+                    message=(
+                        f"Exported SVG from the file on disk {input_path} to {output_path}"
+                        if operation == "save"
+                        else f"Converted {input_path} to {output_path}"
+                    ),
                     data={
                         "input_path": str(input_path_obj.resolve()),
                         "output_path": output_path,

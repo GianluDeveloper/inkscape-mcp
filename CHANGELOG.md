@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native saving of an existing desktop document now uses Inkscape's current
+  filename, including after GUI Save As, and clears the unsaved state through
+  the native save action. Inspection no longer exports or rewrites the live
+  drawing as a prerequisite to saving.
+- Reject a different `save_document.output_path` instead of silently saving to
+  the old path; distinguish disk exports and live copies from native saves.
+- Set application identity before native startup to avoid D-Bus collisions and
+  aborts when batch, shell, or managed Inkscape processes start concurrently.
+- Restore relative resource links after Inkscape serializes a temporary extension
+  input, preserving existing images during insertion and save verification.
 - CLI and shell failures, timeouts, cancellation cleanup, and malformed actions.
 - Transport selection, portable entry points, and per-server tool configuration.
 - Correlation of extension results when GTK delays its D-Bus acknowledgement.

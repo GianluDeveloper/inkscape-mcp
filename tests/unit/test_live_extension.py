@@ -1,6 +1,7 @@
 """Correlated extension transport and transactional SVG append regressions."""
 
 import asyncio
+import io
 import json
 import os
 import subprocess
@@ -320,3 +321,269 @@ def test_extension_rejects_another_application_even_when_document_ids_match(tmp_
             original, request(target={"root_id": "original", "session_id": "desktop"})
         )
     assert etree.tostring(original) == ORIGINAL.encode()
+
+
+@pytest.mark.parametrize("native_path", ["", "/actual/drawing.svg"])
+def test_inspection_reads_native_path_without_modifying_input(monkeypatch, native_path):
+    monkeypatch.setenv("DOCUMENT_PATH", native_path)
+    original = etree.fromstring(ORIGINAL)
+    original.set(f"{{{plugin.SODIPODI_NS}}}docname", "/stale/export-name.svg")
+    before = etree.tostring(original)
+    result = plugin.prepare_inspection(
+        original, request(operation="inspect", target={"session_id": "desktop"})
+    )
+    assert result["active_document"] == {
+        "root_id": "original",
+        "docname": "/stale/export-name.svg",
+        "path": native_path,
+        "path_source": "DOCUMENT_PATH",
+    }
+    assert result["svg_content"].encode() == before
+    assert etree.tostring(original) == before
+
+
+@pytest.mark.parametrize("tag", ["image", "use", "a"])
+@pytest.mark.parametrize("attribute", ["href", plugin.XLINK_HREF])
+def test_inspection_restores_temporary_links_without_changing_xml_base(
+    tmp_path, monkeypatch, tag, attribute
+):
+    native_file = tmp_path / "project" / "drawing.svg"
+    temporary_file = tmp_path / "ink_ext_temp.svg"
+    monkeypatch.setenv("DOCUMENT_PATH", str(native_file))
+    original = etree.fromstring(ORIGINAL)
+    linked = etree.SubElement(original, f"{{{plugin.SVG_NS}}}{tag}")
+    linked.set(attribute, "project/images/caff%C3%A8%20%231.png?size=2#part")
+    linked.set("{http://www.w3.org/XML/1998/namespace}base", "unchanged/")
+    linked.set("style", "fill:url(project/paint.svg#color)")
+    before = etree.tostring(original)
+    result = plugin.prepare_inspection(
+        original,
+        request(operation="inspect", target={"session_id": "desktop"}),
+        str(temporary_file),
+    )
+    restored = etree.fromstring(result["svg_content"])[-1]
+    assert restored.get(attribute) == "images/caff%C3%A8%20%231.png?size=2#part"
+    assert restored.get("{http://www.w3.org/XML/1998/namespace}base") == "unchanged/"
+    assert restored.get("style") == linked.get("style")
+    assert etree.tostring(original) == before
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "",
+        "#local",
+        "?query",
+        "/absolute.png",
+        "//server/asset.png",
+        "https://example.test/a",
+        "data:image/png;base64,AA==",
+        "FILE:linked.png",
+        "FiLe:linked.png",
+    ],
+)
+def test_native_serializer_exclusions_are_preserved(tmp_path, href):
+    original = etree.fromstring(ORIGINAL)
+    original[0].set("href", href)
+    restored = plugin.restore_document_links(
+        original, str(tmp_path / "temporary.svg"), str(tmp_path / "project" / "drawing.svg")
+    )
+    assert restored[0].get("href") == href
+
+
+def test_link_restoration_matches_native_href_priority_and_unnamed_document(tmp_path):
+    original = etree.fromstring(ORIGINAL)
+    original[0].set("href", "project/linked%20image.png#part")
+    original[0].set(plugin.XLINK_HREF, "already-native.png")
+    restored = plugin.restore_document_links(original, str(tmp_path / "temporary.svg"), "")
+    assert restored[0].get("href") == (tmp_path / "project" / "linked image.png").as_uri() + "#part"
+    assert restored[0].get(plugin.XLINK_HREF) == "already-native.png"
+
+
+def test_append_restores_existing_links_and_keeps_new_links_native(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCUMENT_PATH", str(tmp_path / "project" / "drawing.svg"))
+    original = etree.fromstring(ORIGINAL)
+    original[0].set(plugin.XLINK_HREF, (tmp_path / "project" / "existing.png").as_uri())
+    before = etree.tostring(original)
+    content = '<svg xmlns="http://www.w3.org/2000/svg"><image href="new.png"/></svg>'
+    candidate, _ = plugin.prepare_append(
+        original, request(svg_content=content), str(tmp_path / "temporary.svg")
+    )
+    assert candidate[0].get(plugin.XLINK_HREF) == "existing.png"
+    assert candidate[-1][0].get("href") == "new.png"
+    assert etree.tostring(original) == before
+
+
+@pytest.mark.parametrize("operation", ["inspect", "append_svg"])
+def test_standalone_effect_rebases_native_temporary_input_links(tmp_path, operation):
+    cache = tmp_path / "cache"
+    exchange = cache / "inkscape-mcp" / "live-extension"
+    exchange.mkdir(parents=True)
+    source = tmp_path / "ink_ext_temporary.svg"
+    original = etree.fromstring(ORIGINAL)
+    original[0].set(plugin.XLINK_HREF, "project/linked.png")
+    source.write_bytes(etree.tostring(original))
+    spec = request(operation=operation, target={"session_id": "desktop", "root_id": "original"})
+    plugin.atomic_json(exchange / "request.json", spec)
+    completed = subprocess.run(
+        [sys.executable, str(Path(plugin.__file__)), str(source)],
+        capture_output=True,
+        check=True,
+        timeout=10,
+        env={
+            **os.environ,
+            "XDG_CACHE_HOME": str(cache),
+            "INKSCAPE_MCP_SESSION_ID": "desktop",
+            "DOCUMENT_PATH": str(tmp_path / "project" / "drawing.svg"),
+        },
+    )
+    result = json.loads((exchange / f"result-{spec['request_id']}.json").read_text())
+    assert result["ok"], result
+    restored = etree.fromstring(
+        result["svg_content"] if operation == "inspect" else completed.stdout
+    )
+    assert restored[0].get(plugin.XLINK_HREF) == "linked.png"
+    assert source.read_bytes() == etree.tostring(original)
+    if operation == "inspect":
+        assert completed.stdout == b""
+
+
+@pytest.mark.parametrize(
+    "target,message",
+    [
+        ({}, "explicit document session"),
+        ({"session_id": "mcp_" + "a" * 32}, "application differs"),
+        ({"session_id": "../desktop"}, "Invalid live extension session"),
+    ],
+)
+def test_inspection_rejects_missing_or_other_document_session(monkeypatch, target, message):
+    monkeypatch.delenv("INKSCAPE_MCP_SESSION_ID", raising=False)
+    monkeypatch.setenv("DOCUMENT_PATH", "/actual/drawing.svg")
+    with pytest.raises(ValueError, match=message):
+        plugin.prepare_inspection(
+            etree.fromstring(ORIGINAL), request(operation="inspect", target=target)
+        )
+
+
+def test_inspection_never_guesses_path_from_document_metadata(monkeypatch):
+    monkeypatch.delenv("DOCUMENT_PATH", raising=False)
+    with pytest.raises(ValueError, match="native DOCUMENT_PATH"):
+        plugin.prepare_inspection(
+            etree.fromstring(ORIGINAL),
+            request(operation="inspect", target={"session_id": "desktop"}),
+        )
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_inspection_suppresses_svg_even_if_loader_changes_serialization(
+    tmp_path, monkeypatch, cancelled
+):
+    monkeypatch.setattr(plugin, "exchange_directory", lambda: tmp_path)
+    monkeypatch.setenv("DOCUMENT_PATH", "")
+    spec = request(operation="inspect", target={"session_id": "desktop"})
+    plugin.atomic_json(tmp_path / "request.json", spec)
+    if cancelled:
+        (tmp_path / f"cancel-{spec['request_id']}").touch()
+    extension = plugin.McpEditXml()
+    extension.document = inkex.load_svg(ORIGINAL)
+    extension.effect()
+    # Even if inkex regards its parsed document as changed, inspect must not
+    # send an SVG back to Inkscape's rebase path.
+    stream = io.BytesIO()
+    extension.save(stream)
+    assert stream.getvalue() == b""
+    result = json.loads((tmp_path / f"result-{spec['request_id']}.json").read_text())
+    assert result["ok"] is not cancelled
+    assert len(extension.document.getroot()) == 1
+
+
+@pytest.mark.parametrize(
+    "native_path",
+    ["", "/actual/unsaved-changes.svg", pytest.param(None, id="reject-inkex-path-fallback")],
+)
+def test_standalone_inspection_writes_result_without_svg_stdout(tmp_path, native_path):
+    cache = tmp_path / "cache"
+    exchange = cache / "inkscape-mcp" / "live-extension"
+    exchange.mkdir(parents=True)
+    source = tmp_path / "ink_ext_temporary.svg"
+    source.write_text(ORIGINAL, encoding="utf-8")
+    spec = request(operation="inspect", target={"session_id": "desktop"})
+    plugin.atomic_json(exchange / "request.json", spec)
+    environment = {
+        **os.environ,
+        "XDG_CACHE_HOME": str(cache),
+        "INKSCAPE_MCP_SESSION_ID": "desktop",
+    }
+    if native_path is None:
+        environment.pop("DOCUMENT_PATH", None)
+    else:
+        environment["DOCUMENT_PATH"] = native_path
+    completed = subprocess.run(
+        [sys.executable, str(Path(plugin.__file__)), str(source)],
+        capture_output=True,
+        check=True,
+        timeout=10,
+        env=environment,
+    )
+    result = json.loads((exchange / f"result-{spec['request_id']}.json").read_text())
+    if native_path is None:
+        assert result["ok"] is False
+        assert "native DOCUMENT_PATH" in result["error"]
+        assert "active_document" not in result
+        assert "svg_content" not in result
+    else:
+        assert result["ok"] is True
+        assert result["active_document"]["path"] == native_path
+        assert etree.fromstring(result["svg_content"]).get("id") == "original"
+    assert completed.stdout == b""
+    assert completed.stderr == b""
+    assert source.read_text(encoding="utf-8") == ORIGINAL
+
+
+@pytest.mark.parametrize("session_id", ["desktop", "mcp_" + "a" * 32])
+async def test_inspection_bridge_requires_no_drawing_identity(exchange, monkeypatch, session_id):
+    suffix = "" if session_id == "desktop" else "." + session_id
+    path_suffix = suffix.replace(".", "/")
+    target = {
+        "session_id": session_id,
+        "bus_name": "org.inkscape.Inkscape" + suffix,
+        "object_path": "/org/inkscape/Inkscape" + path_suffix,
+    }
+    folder = exchange if session_id == "desktop" else exchange / "sessions" / session_id
+
+    async def activate(address, _timeout):
+        assert address == target
+        spec = json.loads((folder / "request.json").read_text())
+        assert spec["operation"] == "inspect"
+        assert "svg_content" not in spec
+        plugin.atomic_json(
+            folder / f"result-{spec['request_id']}.json",
+            {"ok": True, "request_id": spec["request_id"], "svg_content": ORIGINAL},
+        )
+
+    monkeypatch.setattr(bridge, "_activate", activate)
+    result = await bridge.inspect_document(target)
+    assert result["svg_content"] == ORIGINAL
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {},
+        {"session_id": "desktop"},
+        {
+            "session_id": "mcp_" + "a" * 32,
+            "bus_name": "org.inkscape.Inkscape",
+            "object_path": "/org/inkscape/Inkscape",
+        },
+    ],
+)
+async def test_inspection_bridge_rejects_unresolved_target_before_dispatch(
+    exchange, monkeypatch, target
+):
+    activate = AsyncMock()
+    monkeypatch.setattr(bridge, "_activate", activate)
+    with pytest.raises(ValueError, match="Inspection"):
+        await bridge.inspect_document(target)
+    activate.assert_not_awaited()
+    assert not list(exchange.iterdir())

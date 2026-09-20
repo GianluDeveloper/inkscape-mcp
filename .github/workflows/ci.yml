@@ -43,7 +43,7 @@ jobs:
           apt-get install --no-install-recommends -y \
             ca-certificates curl git build-essential pkg-config python3-dev \
             libcairo2-dev libgirepository-2.0-dev gir1.2-gtk-3.0 \
-            inkscape libmagic1 fonts-dejavu-core xvfb xauth dbus-x11 xclip \
+            inkscape libmagic1 fonts-dejavu-core xvfb xauth dbus-x11 xclip x11-utils libxtst6 \
             python3-numpy python3-lxml python3-scour python3-cssselect python3-platformdirs
 
       - uses: actions/checkout@v4
@@ -67,10 +67,10 @@ jobs:
           /usr/bin/python3 -c "import sys; sys.path.insert(0, '/usr/share/inkscape/extensions'); import inkex; print('Inkscape extension interpreter imports successfully')"
 
       - name: Lint Python
-        run: uv run --frozen ruff check src tests scripts/desktop_smoke.py run_server.py
+        run: uv run --frozen ruff check src tests scripts/desktop_smoke.py scripts/native_save_smoke.py run_server.py
 
       - name: Check Python formatting
-        run: uv run --frozen ruff format --check src tests scripts/desktop_smoke.py run_server.py
+        run: uv run --frozen ruff format --check src tests scripts/desktop_smoke.py scripts/native_save_smoke.py run_server.py
 
       - name: Run unit and real CLI integration tests
         run: uv run --frozen pytest tests --junitxml=test-results.xml
@@ -90,6 +90,12 @@ jobs:
         run: |
           xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- \
             uv run --frozen python scripts/desktop_smoke.py --output-dir /tmp/inkscape-desktop-smoke
+
+      - name: Verify native saves and unsaved window state
+        if: matrix.python-version == '3.12'
+        env:
+          GLYCIN_DISABLE_SANDBOX: i-know-the-risks
+        run: uv run --frozen python scripts/native_save_smoke.py --output-dir /tmp/inkscape-native-save-smoke
 
       - name: Build and validate Python distributions
         run: |
@@ -113,6 +119,7 @@ jobs:
             coverage.xml
             htmlcov/
             /tmp/inkscape-desktop-smoke/
+            /tmp/inkscape-native-save-smoke/
             /tmp/inkscape-ci-cache/inkscape-mcp/
           if-no-files-found: warn
 

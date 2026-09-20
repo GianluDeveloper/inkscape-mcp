@@ -32,6 +32,14 @@ Each managed application inherits a session identity and uses its own exchange
 directory. A delayed extension invocation cannot claim a different window's
 request, including when documents share the same filename and SVG root ID.
 
+Native saves use the window's `document-save` action. The extension reads the
+actual filename from Inkscape's `DOCUMENT_PATH`; a registry entry or SVG
+`sodipodi:docname` can be stale after **Save As**. Read-only inspection returns
+JSON through the exchange directory and emits no SVG to stdout, so Inkscape
+does not apply a document edit. These details follow the native
+[extension environment](https://gitlab.com/inkscape/inkscape/-/blob/INKSCAPE_1_4_4/src/extension/extension.cpp)
+and [script effect lifecycle](https://gitlab.com/inkscape/inkscape/-/blob/INKSCAPE_1_4_4/src/extension/implementation/script.cpp).
+
 A clipboard paste was explored as an initial bridge. It is native and undoable,
 but introduces desktop clipboard ownership, focus, insertion position, and
 session-specific timing dependencies. The extension integration is intended to

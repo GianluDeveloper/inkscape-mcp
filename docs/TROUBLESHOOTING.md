@@ -74,12 +74,20 @@ repeating it. A dispatched effect may already have changed the document.
 can be undone through **Edit → Undo**. If only the final view adjustment failed,
 `view_warning` is populated but the inserted objects can already be present.
 
-## Saving or closing managed documents
+## Saving or closing documents
 
-`save_document` writes to the managed session's original SVG path and verifies
-it against the live drawing. A manual Save As or open save dialog can prevent
-that verification. `save_copy` writes a verified snapshot to `output_path` and
-does not rename the GUI document. It works for `desktop` as well.
+`save_document` supports managed sessions and the ordinary single-window
+`desktop`. It reads the current SVG filename directly from Inkscape and verifies
+the saved content there, including after a GUI **Save As**. An unnamed document
+must first be named through **File → Save As**, or created using `new_document`.
+An `output_path` different from the current filename is rejected before saving.
+Resolve any open modal dialog before retrying.
+
+`save_copy` writes a verified live copy to `output_path` without changing the
+open document's filename or clearing its unsaved-changes state. Its
+`data.live_document_saved` is `false`; a successful `save_document` returns
+`true`. Check that field and `data.output_path` when confirming a save. File-based
+`inkscape_file.save` exports the existing file on disk and excludes unsaved edits.
 
 `close_document` requires a managed session and invokes the native close action.
 An unsaved-changes dialog keeps the window open. The tool reports this rather
@@ -101,6 +109,11 @@ Desktop calls from one wrapper are serialized. Separate MCP processes or other
 clients can still compete for the same GUI. Run a single desktop controller and
 use file-based batch operations for independent parallel jobs. Preserve a minimal
 SVG and action sequence when reporting a remaining native crash.
+
+Document inspection uses native Inkscape metadata rather than reading window
+titles through the AT-SPI accessibility interface. If investigating an
+accessibility-related crash, avoid adding AT-SPI title/tree probes to the
+reproduction; use the MCP response, Inkscape stderr, and a minimal document.
 
 ## A command exits successfully but the operation fails
 

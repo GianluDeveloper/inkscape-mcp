@@ -78,6 +78,8 @@ async def test_isolated_process_and_graceful_close(spawn):
         args = spawn.call_args.args
         assert "--batch-process" in args
         assert any(arg.startswith("--app-id-tag=inkscape_mcp_") for arg in args)
+        tag = spawn.call_args.kwargs["env"]["INKSCAPE_APP_ID_TAG"]
+        assert f"--app-id-tag={tag}" in args
         assert spawn.call_args.kwargs["stderr"] == asyncio.subprocess.STDOUT
     assert process.waited
     assert not shell.is_running

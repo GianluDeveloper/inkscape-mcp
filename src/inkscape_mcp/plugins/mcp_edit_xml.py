@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append SVG through an undoable Inkscape effect, with request correlation.
+"""Inspect a live document or append SVG with correlated, undoable requests.
 
 Adapted from https://github.com/aravindev/inkscape_mcp (mcp_edit_xml.py).
 
@@ -38,12 +38,17 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import quote
+from urllib.parse import unquote
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 import inkex
 from lxml import etree
 
 SVG_NS = "http://www.w3.org/2000/svg"
 SODIPODI_NS = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
 MAX_BYTES = 10 * 1024 * 1024
 DRAWABLE = {
     "rect",
@@ -102,13 +107,23 @@ def document_identity(root) -> dict:
     return {"root_id": root.get("id") or "", "docname": docname, "path": path}
 
 
-def validate_target(root, target: dict) -> None:
-    if not isinstance(target, dict) or not (target.get("root_id") or target.get("path")):
+def validate_target(root, target: dict, require_identity: bool = True) -> None:
+    if not isinstance(target, dict):
+        raise ValueError("Expected document target must be an object")
+    if require_identity and not (target.get("root_id") or target.get("path")):
         raise ValueError("Expected document root_id or absolute path is required")
     expected_session = target.get("session_id", "desktop")
+    if not require_identity and "session_id" not in target:
+        raise ValueError("Inspection requires an explicit document session ID")
+    if not isinstance(expected_session, str) or (
+        expected_session != "desktop" and not re.fullmatch(r"mcp_[a-f0-9]{32}", expected_session)
+    ):
+        raise ValueError("Invalid live extension session ID")
     if expected_session != os.getenv("INKSCAPE_MCP_SESSION_ID", "desktop"):
         raise ValueError("Active application differs from the requested document session")
     actual = document_identity(root)
+    if not require_identity:
+        actual["path"] = os.environ.get("DOCUMENT_PATH", "")
     for key in ("root_id", "docname", "path"):
         if key not in target:
             continue
@@ -130,14 +145,89 @@ def validate_request(spec: dict) -> str:
     expiry = spec.get("expires_at")
     if not isinstance(expiry, (float, int)) or not math.isfinite(expiry) or expiry <= time.time():
         raise ValueError("Request expired before it could be applied")
-    if spec.get("operation") != "append_svg":
-        raise ValueError("Only append_svg is supported by this extension")
+    if spec.get("operation") not in {"append_svg", "inspect"}:
+        raise ValueError("Only append_svg and inspect are supported by this extension")
     return request_id
 
 
-def prepare_append(root, spec: dict):
+def restore_document_links(root, input_file: str | None, native_path: str):
+    """Undo Inkscape's temporary-file href rebasing on an independent clone.
+
+    Inkscape's repr-io.cpp calls rebase_href_attrs for every element while
+    serializing its extension input. Match that helper's attribute priority
+    and exclusions. CSS URLs and xml:base are not rewritten by that serializer.
+    Extension output is then merged into the original document without rebasing.
+    """
+    candidate = copy.deepcopy(root)
+    if not input_file:
+        return candidate
+    input_uri = urlsplit(str(input_file))
+    temporary_path = unquote(input_uri.path) if input_uri.scheme == "file" else str(input_file)
+    temporary_directory = Path(temporary_path).absolute().parent
+    native_directory = Path(native_path).parent if native_path else None
+    for node in candidate.iter():
+        if not isinstance(node.tag, str):
+            continue
+        key = "href" if "href" in node.attrib else XLINK_HREF
+        href = node.get(key)
+        if not href or href.startswith(("#", "?", "/")):
+            continue
+        # GLib's native serializer compares the original scheme case exactly;
+        # urlsplit lowercases it, so retain that distinction before parsing.
+        scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", href)
+        if scheme and scheme.group() != "file:":
+            continue
+        uri = urlsplit(href)
+        if uri.scheme not in ("", "file") or uri.netloc:
+            continue
+        filename = unquote(uri.path, errors="surrogateescape")
+        absolute = os.path.normpath(temporary_directory / filename)
+        if native_directory is None:
+            restored = urlsplit(Path(absolute).as_uri())
+            value = urlunsplit(
+                (restored.scheme, restored.netloc, restored.path, uri.query, uri.fragment)
+            )
+        else:
+            relative = os.path.relpath(absolute, native_directory)
+            path = quote(relative, safe="/@!$&'()*+,;=-._~", errors="surrogateescape")
+            value = urlunsplit(("", "", path, uri.query, uri.fragment))
+        node.set(key, value)
+    return candidate
+
+
+def prepare_inspection(root, spec: dict, input_file: str | None = None) -> dict:
+    """Return live XML and Inkscape's native filename without changing the XML."""
+    request_id = validate_request(spec)
+    if spec["operation"] != "inspect":
+        raise ValueError("An inspect request is required")
+    validate_target(root, spec.get("target"), require_identity=False)
+    # Inkscape supplies its actual SPDocument filename here, independently of
+    # sodipodi:docname (which may be stale or contain only a basename).
+    if "DOCUMENT_PATH" not in os.environ:
+        raise ValueError("Inkscape did not provide the native DOCUMENT_PATH")
+    path = os.environ["DOCUMENT_PATH"]
+    if path and not Path(path).is_absolute():
+        raise ValueError("Native DOCUMENT_PATH is not absolute")
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "operation": "inspect",
+        "active_document": {
+            **document_identity(root),
+            "path": path,
+            "path_source": "DOCUMENT_PATH",
+        },
+        "svg_content": etree.tostring(
+            restore_document_links(root, input_file, path), encoding="unicode"
+        ),
+    }
+
+
+def prepare_append(root, spec: dict, input_file: str | None = None):
     """Validate everything on a clone so errors never partly mutate the document."""
     request_id = validate_request(spec)
+    if spec["operation"] != "append_svg":
+        raise ValueError("An append_svg request is required")
     validate_target(root, spec.get("target"))
     content = spec.get("svg_content")
     if not isinstance(content, str) or not content.strip():
@@ -176,7 +266,9 @@ def prepare_append(root, spec: dict):
                 raise ValueError("Generated object ID collides with the active document")
             node.set("id", identifier)
         inserted_ids.add(identifier)
-    candidate = copy.deepcopy(root)
+    # Only existing content was rebased into Inkscape's temporary input file.
+    # The newly supplied SVG already uses the original document's base.
+    candidate = restore_document_links(root, input_file, os.environ.get("DOCUMENT_PATH", ""))
     # Preserve the source viewport/coordinate system as a nested SVG rather than
     # flattening children and silently changing their dimensions or positions.
     candidate.append(source)
@@ -212,7 +304,14 @@ def claim_request(folder: Path):
 
 
 class McpEditXml(inkex.EffectExtension):
+    def run(self, *args, **kwargs):
+        # inkex falls back to its temporary input filename when DOCUMENT_PATH
+        # is absent. Record native provenance before that fallback runs.
+        self._native_document_path_provided = "DOCUMENT_PATH" in os.environ
+        return super().run(*args, **kwargs)
+
     def effect(self) -> None:
+        self._emit_svg = False
         folder = exchange_directory()
         claimed_request = claim_request(folder)
         if claimed_request is None:
@@ -220,20 +319,40 @@ class McpEditXml(inkex.EffectExtension):
         spec, claimed = claimed_request
         request_id = spec["request_id"]
         original = self.document.getroot()
+        input_file = getattr(getattr(self, "options", None), "input_file", None)
+        if not isinstance(input_file, (str, os.PathLike)):
+            input_file = self.document.docinfo.URL
         result_path = folder / f"result-{request_id}.json"
         try:
-            candidate, result = prepare_append(original, spec)
+            if spec.get("operation") == "inspect":
+                if not getattr(
+                    self, "_native_document_path_provided", "DOCUMENT_PATH" in os.environ
+                ):
+                    raise ValueError("Inkscape did not provide the native DOCUMENT_PATH")
+                candidate = None
+                result = prepare_inspection(original, spec, input_file)
+            else:
+                candidate, result = prepare_append(original, spec, input_file)
             with state_lock(folder):
                 validate_request(spec)
                 if (folder / f"cancel-{request_id}").exists():
                     raise ValueError("Request was cancelled before application")
-                self.document._setroot(candidate)
+                if candidate is not None:
+                    self.document._setroot(candidate)
                 atomic_json(result_path, result)
+                self._emit_svg = candidate is not None
         except Exception as exc:
             self.document._setroot(original)
             atomic_json(result_path, {"ok": False, "request_id": request_id, "error": str(exc)})
         finally:
             claimed.unlink(missing_ok=True)
+
+    def save(self, stream) -> None:
+        # Native Script::_change_extension returns before document rebase when
+        # stdout is empty. Inspect, rejected, and absent requests must therefore
+        # never serialize the input SVG, even if inkex normalizes it on load.
+        if getattr(self, "_emit_svg", False):
+            super().save(stream)
 
 
 if __name__ == "__main__":

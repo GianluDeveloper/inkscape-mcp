@@ -40,9 +40,13 @@ the bundled inkex effect. Call `inkscape_system` for this workflow:
    `draw_test(text="Prova MCP OK", session_id=...)`.
 5. Require the successful response's `data.verified` and inspect its object IDs.
    A failed or uncertain insertion must not be retried automatically.
-6. `save_document(session_id=...)` saves a managed document to its named path.
+6. `save_document(session_id=...)` saves a managed document or single-window
+   `desktop` to its current native SVG filename, including after GUI Save As.
+   Require `data.verified` and `data.live_document_saved` to be true. Unnamed
+   drawings need GUI Save As first; a different `output_path` is rejected.
    `save_copy(session_id=..., output_path=...)` exports a snapshot without
-   changing the live document's filename.
+   changing the live document's filename or clearing its unsaved state.
+   `inkscape_file(operation="save")` exports a file on disk, excluding GUI edits.
 7. `close_document(session_id=...)` closes a managed instance through Inkscape's
    guarded quit action; an unsaved-changes dialog is not force-dismissed.
 

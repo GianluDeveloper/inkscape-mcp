@@ -41,7 +41,7 @@ Parameters: `operation`, `input_path`, `output_path`, `format`.
 | Operation | Behavior / relevant parameters |
 | --- | --- |
 | `load` | Validate and inspect a file at `input_path`; does not open a desktop window |
-| `save` | Export `input_path` to `output_path` as SVG |
+| `save` | Export an existing file on disk from `input_path` to an `.svg` `output_path`; use `inkscape_system` with `save_document` or `save_copy` for unsaved GUI edits |
 | `convert` | Export with `input_path`, `output_path`, and `format` |
 | `info` | Read file/document metadata |
 | `validate` | Check the source using Inkscape |
@@ -157,8 +157,8 @@ is safe in every embedding context.
 | `active_document` | Read live SVG and object details from `session_id`, including unsaved content |
 | `insert_svg` | Apply the native extension to `session_id` with complete `svg_content`; verify inserted objects |
 | `draw_test` | Insert a rectangle and editable `text` label in `session_id`; default `Prova MCP OK` |
-| `save_document` | Save a managed `session_id` to its original path and verify live/disk content |
-| `save_copy` | Save live SVG from `session_id` to `output_path`; preserve the GUI filename |
+| `save_document` | Save a managed session or single-window `desktop` to its current SVG filename; verify live/disk content |
+| `save_copy` | Save live SVG from `session_id` to `output_path`; preserve the GUI filename without marking the open document as saved |
 | `close_document` | Request a managed session's native document close; never discard unsaved edits automatically |
 | `list_extensions` | Discover `.inx` extension metadata |
 | `execute_extension` | Reserved interface; generic extension execution is disabled |
@@ -172,8 +172,21 @@ command bridge.
 
 `session_id` defaults to `desktop`. Use IDs returned by `open_document`,
 `new_document`, or `list_documents` to target managed instances. The ordinary
-`desktop` instance must have one window. `save_document` and `close_document`
-require a managed session; `save_copy` also works with `desktop`.
+`desktop` instance must have one window. Both `save_document` and `save_copy`
+support it; `close_document` requires a managed session.
+
+`save_document` reads the current filename from Inkscape's native `DOCUMENT_PATH`,
+so a GUI **Save As** takes precedence over the path recorded when the session was
+opened. It invokes native `document-save` and verifies the content at that path.
+Success returns `data.verified: true` and `data.live_document_saved: true`.
+Omit `output_path`, or supply the same current filename; a different destination
+is rejected before the save action. To name an untitled document or change its
+filename, use **File → Save As** in Inkscape, or create a named document with
+`new_document`. MCP does not perform **Save As**.
+
+`save_copy` requires an `.svg` `output_path` and returns `data.verified: true`
+with `data.live_document_saved: false`. It creates a verified live copy while
+preserving the open document's filename; pending changes still need to be saved.
 
 `insert_svg` rejects malformed XML, DTD/entity declarations, empty artwork, and
 oversized payloads. The native effect rejects object-ID collisions rather than

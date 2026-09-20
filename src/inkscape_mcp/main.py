@@ -223,7 +223,9 @@ class InkscapeMCPServer:
 
             Operations:
             - load: Read/validate path exists for editing workflows.
-            - save: Persist changes (requires paths per server policy).
+            - save: Export an existing file on disk as SVG to output_path; requires input_path.
+                Unsaved GUI edits are saved through inkscape_system with operation save_document
+                or save_copy and the intended session_id.
             - convert: Export to pdf/png/etc. (needs output_path, format).
             - info: Metadata and dimensions.
             - validate: Structural check via CLI query.
@@ -231,8 +233,8 @@ class InkscapeMCPServer:
 
             Args:
                 operation: Must be one of the Literal values (schema-enumerated).
-                input_path: Source file; may be empty for list_formats only.
-                output_path: Destination for save/convert when applicable.
+                input_path: Existing source file on disk; may be empty for list_formats only.
+                output_path: File export destination for save/convert; save requires an .svg path.
                 format: Target format for convert (e.g. pdf, png).
 
             Returns:
@@ -627,9 +629,11 @@ class InkscapeMCPServer:
                 offset: Starting index in filtered list_actions results (default 0).
                 input_path: Existing SVG to open in a separate managed session.
                 output_path: New SVG path for new_document (refuses overwrite), or snapshot
-                    destination for save_copy (preserves the GUI filename).
+                    destination for save_copy (preserves the GUI filename and unsaved state).
+                    save_document uses the native filename; a different output_path is rejected.
                 session_id: Managed ID returned by list_documents/open_document/new_document,
-                    or desktop for an existing single-window instance. Save/close require a managed ID.
+                    or desktop for an existing single-window instance. Only close requires a managed ID.
+                    Native save requires a named document and the installed live extension.
 
             Returns:
                 Dict with success, message, data, execution_time_ms, error.

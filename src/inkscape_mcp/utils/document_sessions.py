@@ -325,7 +325,14 @@ async def open_document(input_path: str, cli_wrapper=None, config=None) -> dict[
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,
-                env={**os.environ, "INKSCAPE_MCP_SESSION_ID": session_id},
+                env={
+                    **os.environ,
+                    "INKSCAPE_MCP_SESSION_ID": session_id,
+                    # The constructor's version probe runs before CLI options.
+                    # Give it the managed identity immediately to avoid races
+                    # with other independently launched Inkscape processes.
+                    "INKSCAPE_APP_ID_TAG": session_id,
+                },
                 start_new_session=True,
             )
         _PROCESSES[session_id] = process

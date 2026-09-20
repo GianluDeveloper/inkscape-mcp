@@ -84,6 +84,19 @@ xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- \
   uv run python scripts/desktop_smoke.py --output-dir /tmp/inkscape-desktop-smoke
 ```
 
+For native saving regressions, install `xvfb`, `xauth`, `dbus-x11`, `x11-utils`,
+and `libxtst6`, then run:
+
+```bash
+uv run python scripts/native_save_smoke.py --output-dir /tmp/inkscape-native-save-smoke
+```
+
+This script always creates its own display, D-Bus session, profile, and cache.
+It checks the window's unsaved marker through X11 without AT-SPI, exercises
+ordinary desktop and managed sessions, and verifies that native saves clear
+that marker while copies retain it. Reports and test documents stay below
+the requested output directory.
+
 The [CI workflow](../.github/workflows/ci.yml) runs Python 3.12 and 3.13 in
 Ubuntu 26.04 with real Inkscape. Its GUI step also isolates XDG profile/cache
 directories and sets Glycin's upstream `GLYCIN_DISABLE_SANDBOX=i-know-the-risks`

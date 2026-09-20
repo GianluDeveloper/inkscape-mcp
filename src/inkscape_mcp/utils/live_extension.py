@@ -64,7 +64,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def install_live_extension(config=None) -> dict:
-    """Install only this bundled append-only effect; never called at startup."""
+    """Install only this bundled inspection/append effect; never called at startup."""
     del config  # Kept for the public install helper's configuration-compatible API.
     if not sys.platform.startswith("linux"):
         raise InkscapeExecutionError("The live extension bridge currently supports Linux desktops")
@@ -159,10 +159,6 @@ async def _activate(target: dict, timeout: float) -> None:
 
 async def append_svg(svg_content: str, target: dict, timeout: float = 15.0) -> dict:
     """Invoke once; a timeout is an uncertain outcome and must never auto-retry."""
-    if not sys.platform.startswith("linux"):
-        raise InkscapeExecutionError("The live extension bridge currently supports Linux desktops")
-    if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
-        raise ValueError("Extension timeout must be finite and positive")
     if (
         not isinstance(svg_content, str)
         or not svg_content.strip()
@@ -171,6 +167,43 @@ async def append_svg(svg_content: str, target: dict, timeout: float = 15.0) -> d
         raise ValueError("A non-empty SVG document within 10 MiB is required")
     if not isinstance(target, dict) or not (target.get("root_id") or target.get("path")):
         raise ValueError("Expected document root_id or path is required")
+    return await _request("append_svg", target, timeout, svg_content=svg_content)
+
+
+async def inspect_document(target: dict, timeout: float = 15.0) -> dict:
+    """Read live SVG and its native filename without returning XML to Inkscape.
+
+    The caller must resolve a single-window target with get_session first.
+    No previously known drawing identity is required; the SVG is never edited.
+    """
+    if not isinstance(target, dict):
+        raise ValueError("Inspection requires a resolved document session")
+    session_id = target.get("session_id")
+    if not isinstance(session_id, str) or (
+        session_id != "desktop" and not re.fullmatch(r"mcp_[a-f0-9]{32}", session_id)
+    ):
+        raise ValueError("Inspection requires an explicit valid document session ID")
+    suffix = "" if session_id == "desktop" else "." + session_id
+    path_suffix = "" if session_id == "desktop" else "/" + session_id
+    if (
+        target.get("bus_name") != "org.inkscape.Inkscape" + suffix
+        or target.get("object_path") != "/org/inkscape/Inkscape" + path_suffix
+    ):
+        raise ValueError("Inspection target address differs from its document session")
+    return await _request("inspect", target, timeout)
+
+
+async def _request(operation: str, target: dict, timeout: float, **payload) -> dict:
+    """Dispatch one scoped, correlated request; preserve the no-retry contract."""
+    if not sys.platform.startswith("linux"):
+        raise InkscapeExecutionError("The live extension bridge currently supports Linux desktops")
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("Extension timeout must be finite and positive")
     folder = exchange_directory()
     session_id = target.get("session_id", "desktop")
     if session_id != "desktop":
@@ -184,8 +217,8 @@ async def append_svg(svg_content: str, target: dict, timeout: float = 15.0) -> d
     result_path = folder / f"result-{request_id}.json"
     spec = {
         "request_id": request_id,
-        "operation": "append_svg",
-        "svg_content": svg_content,
+        "operation": operation,
+        **payload,
         "target": target,
         "expires_at": time.time() + timeout,
     }

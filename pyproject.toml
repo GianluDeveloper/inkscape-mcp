@@ -92,7 +92,7 @@ packages = ["src/inkscape_mcp"]
 [tool.hatch.build.targets.sdist]
 only-include = [
     "src", "tests", "docs", "examples",
-    "scripts/desktop_smoke.py", "scripts/fleet_e2e_smoke.py",
+    "scripts/desktop_smoke.py", "scripts/native_save_smoke.py", "scripts/fleet_e2e_smoke.py",
     "README.md", "INSTALL.md", "CONTRIBUTING.md", "CHANGELOG.md",
     "LICENSE", "NOTICE.md", "pyproject.toml", "uv.lock",
     "pytest.ini", "ruff.toml", "run_server.py",

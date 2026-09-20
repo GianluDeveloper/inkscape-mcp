@@ -1,4 +1,4 @@
-"""Verified save/copy and guarded close behavior for managed documents."""
+"""Verified native save/copy and guarded close behavior for addressed documents."""
 
 import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
@@ -38,25 +38,25 @@ def session(tmp_path, monkeypatch, mock_cli_wrapper):
 
     monkeypatch.setattr(lifecycle.document_sessions, "_registry", registry)
     monkeypatch.setattr(lifecycle.document_sessions, "_save_registry", Mock())
+    inspection = {
+        "active_document": {"path": str(source), "path_source": "DOCUMENT_PATH"},
+        "svg_content": SVG,
+    }
+    inspector = AsyncMock(return_value=inspection)
+    monkeypatch.setattr(lifecycle, "inspect_document", inspector)
     return SimpleNamespace(
         target=target,
         source=source,
         wrapper=mock_cli_wrapper,
         config=mock_cli_wrapper.config,
         records=records,
+        inspection=inspection,
+        inspector=inspector,
     )
 
 
-async def test_save_uses_same_directory_snapshot_and_cleans_it(session, monkeypatch):
-    snapshots = []
-
-    async def snapshot(_wrapper, _config, path, _target):
-        snapshots.append(path)
-        assert path.parent == session.source.parent
-        assert path != session.source
-        path.write_text(SVG)
-        return ET.fromstring(SVG)
-
+async def test_save_inspects_without_exporting_the_live_document(session, monkeypatch):
+    snapshot = AsyncMock()
     action = AsyncMock()
     monkeypatch.setattr(lifecycle, "_snapshot", snapshot)
     monkeypatch.setattr(lifecycle, "_window_action", action)
@@ -64,9 +64,86 @@ async def test_save_uses_same_directory_snapshot_and_cleans_it(session, monkeypa
         "save_document", "mcp_test", "", session.wrapper, session.config
     )
     assert result["verified"]
+    assert result["live_document_saved"]
+    assert not result["saved_copy"]
     assert session.source.read_text() == SVG
     action.assert_awaited_once_with(session.target, "document-save")
-    assert snapshots and all(not path.exists() for path in snapshots)
+    snapshot.assert_not_awaited()
+    session.inspector.assert_awaited_once()
+
+
+async def test_desktop_native_save_updates_disk(session, monkeypatch):
+    session.target.update(managed=False, session_id="desktop")
+    session.target.pop("input_path")
+    edited = SVG.replace('width="20"', 'width="50"')
+    session.inspection["svg_content"] = edited
+
+    async def native_save(target, action):
+        assert target is session.target
+        assert action == "document-save"
+        session.source.write_text(edited)
+
+    monkeypatch.setattr(lifecycle, "_window_action", native_save)
+    result = await lifecycle.document_lifecycle(
+        "save_document", "desktop", "", session.wrapper, session.config
+    )
+    assert result["verified"] and result["live_document_saved"]
+    assert result["output_path"] == str(session.source)
+    assert session.source.read_text() == edited
+
+
+async def test_save_rejects_different_destination_before_native_action(session, monkeypatch):
+    destination = session.source.with_name("save-as.svg")
+    action = AsyncMock()
+    monkeypatch.setattr(lifecycle, "_window_action", action)
+    with pytest.raises(ValueError, match="different output_path is not Save As"):
+        await lifecycle.document_lifecycle(
+            "save_document", "mcp_test", str(destination), session.wrapper, session.config
+        )
+    action.assert_not_awaited()
+    assert session.source.read_text() == SVG
+    assert not destination.exists()
+
+
+async def test_save_follows_native_filename_after_gui_save_as(session, monkeypatch):
+    current = session.source.with_name("gui-save-as.svg")
+    edited = SVG.replace('width="20"', 'width="50"')
+    current.write_text(SVG)
+    session.inspection["active_document"]["path"] = str(current)
+    session.inspection["svg_content"] = edited
+    action = AsyncMock(side_effect=lambda *_: current.write_text(edited))
+    monkeypatch.setattr(lifecycle, "_window_action", action)
+    result = await lifecycle.document_lifecycle(
+        "save_document", "mcp_test", str(current), session.wrapper, session.config
+    )
+    assert result["output_path"] == str(current)
+    assert current.read_text() == edited
+    assert session.source.read_text() == SVG
+    assert session.records["mcp_test"]["input_path"] == str(current)
+    action.assert_awaited_once_with(session.target, "document-save")
+
+
+@pytest.mark.parametrize("native_path", ["", "relative.svg"])
+async def test_unnamed_save_fails_without_opening_a_dialog(session, monkeypatch, native_path):
+    session.inspection["active_document"]["path"] = native_path
+    action = AsyncMock()
+    monkeypatch.setattr(lifecycle, "_window_action", action)
+    with pytest.raises(ValueError, match="File > Save As"):
+        await lifecycle.document_lifecycle(
+            "save_document", "mcp_test", "", session.wrapper, session.config
+        )
+    action.assert_not_awaited()
+
+
+async def test_failed_inspection_never_sends_save(session, monkeypatch):
+    session.inspector.side_effect = InkscapeExecutionError("inspection timed out")
+    action = AsyncMock()
+    monkeypatch.setattr(lifecycle, "_window_action", action)
+    with pytest.raises(InkscapeExecutionError, match="inspection timed out"):
+        await lifecycle.document_lifecycle(
+            "save_document", "mcp_test", "", session.wrapper, session.config
+        )
+    action.assert_not_awaited()
 
 
 async def test_copy_preserves_previous_destination_when_snapshot_fails(
@@ -95,13 +172,10 @@ async def test_native_save_noop_verifies_normalized_disk_without_overwriting(
     minimal = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="20" height="10"/></svg>'
     session.source.write_text(minimal)
 
-    async def snapshot(_wrapper, _config, path, _target):
-        path.write_text(SVG)
-        return ET.fromstring(SVG)
-
-    async def normalize(input_path, output_path, export_type):
-        assert input_path == str(session.source)
+    async def normalize(input_path, output_path, export_type, export_area):
+        assert Path(input_path).parent == session.source.parent
         assert export_type == "svg"
+        assert export_area == "page"
         assert session.source.read_text() == minimal
         assert Path(output_path).parent == session.source.parent
         normalized = SVG.replace("</svg>", "<!--" + "a" * normalized_padding + "--></svg>")
@@ -109,14 +183,13 @@ async def test_native_save_noop_verifies_normalized_disk_without_overwriting(
 
     export = AsyncMock(side_effect=normalize)
     monkeypatch.setattr(session.wrapper, "export_file", export)
-    monkeypatch.setattr(lifecycle, "_snapshot", snapshot)
     monkeypatch.setattr(lifecycle, "_window_action", AsyncMock())
     result = await lifecycle.document_lifecycle(
         "save_document", "mcp_test", "", session.wrapper, session.config
     )
     assert result["verified"]
     assert session.source.read_text() == minimal
-    export.assert_awaited_once()
+    assert export.await_count == 2
     assert not list(session.source.parent.glob("inkscape-mcp-snapshot-*"))
 
 
@@ -125,6 +198,7 @@ async def test_large_document_save_uses_configured_limit(session, monkeypatch, o
     session.config.max_file_size_mb = 100
     content = SVG.replace("</svg>", "<!--" + "a" * (10 * 1024 * 1024) + "--></svg>")
     session.source.write_text(content)
+    session.inspection["svg_content"] = content
     destination = (
         session.source if operation == "save_document" else session.source.with_name("copy.svg")
     )
@@ -140,6 +214,7 @@ async def test_large_document_save_uses_configured_limit(session, monkeypatch, o
     )
 
     assert result["verified"]
+    assert result["live_document_saved"] is (operation == "save_document")
     assert result["bytes"] > 10 * 1024 * 1024
     assert destination.read_text() == content
     assert session.source.read_text() == content
@@ -147,18 +222,15 @@ async def test_large_document_save_uses_configured_limit(session, monkeypatch, o
 
 async def test_normalization_does_not_hide_unsaved_drawing_changes(session, monkeypatch):
     expected = SVG.replace('width="20"', 'width="50"')
+    session.inspection["svg_content"] = expected
 
-    async def snapshot(_wrapper, _config, path, _target):
-        path.write_text(expected)
-        return ET.fromstring(expected)
-
-    async def normalize(_input_path, output_path, export_type):
+    async def normalize(input_path, output_path, export_type, export_area):
         assert export_type == "svg"
-        Path(output_path).write_text(SVG)
+        assert export_area == "page"
+        Path(output_path).write_text(Path(input_path).read_text())
 
     export = AsyncMock(side_effect=normalize)
     monkeypatch.setattr(session.wrapper, "export_file", export)
-    monkeypatch.setattr(lifecycle, "_snapshot", snapshot)
     monkeypatch.setattr(lifecycle, "_window_action", AsyncMock())
     monkeypatch.setattr(lifecycle.asyncio, "sleep", AsyncMock())
     with pytest.raises(InkscapeExecutionError, match="could not be verified"):
@@ -166,7 +238,7 @@ async def test_normalization_does_not_hide_unsaved_drawing_changes(session, monk
             "save_document", "mcp_test", "", session.wrapper, session.config
         )
     assert session.source.read_text() == SVG
-    export.assert_awaited_once()
+    assert export.await_count == 2
 
 
 async def test_close_uses_guarded_application_quit_and_removes_registry(session, monkeypatch):

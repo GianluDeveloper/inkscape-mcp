@@ -405,9 +405,23 @@ class InkscapeCliWrapper:
                     )
         except ValueError as exc:
             raise InkscapeExecutionError(str(exc)) from exc
+        environment = self._get_environment()
         if "--active-window" not in command and "-q" not in command:
-            if not any(arg.startswith("--app-id-tag") for arg in command):
-                command.insert(1, f"--app-id-tag=inkscape-mcp-{uuid4().hex}")
+            tag = next(
+                (arg.partition("=")[2] for arg in command if arg.startswith("--app-id-tag=")),
+                None,
+            )
+            if tag is None and "--app-id-tag" in command:
+                index = command.index("--app-id-tag")
+                if index + 1 < len(command):
+                    tag = command[index + 1]
+            if tag is None:
+                tag = f"inkscape-mcp-{uuid4().hex}"
+                command.insert(1, f"--app-id-tag={tag}")
+            # Inkscape probes the default D-Bus application during construction,
+            # before reading --app-id-tag. Concurrent launches can race in that
+            # version check and abort. Set the same identity before construction.
+            environment["INKSCAPE_APP_ID_TAG"] = tag
             # Queries and plain exports already terminate without a GUI.
             # --batch-process is only needed for actions and can otherwise
             # initialize the desktop unnecessarily on machines with DISPLAY.
@@ -421,7 +435,7 @@ class InkscapeCliWrapper:
                     *command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=self._get_environment(),
+                    env=environment,
                 )
                 try:
                     stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)

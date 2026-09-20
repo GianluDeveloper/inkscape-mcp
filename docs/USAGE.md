@@ -118,6 +118,25 @@ If an insertion is unverified, inspect the document before repeating it. A
 command failure after the desktop received the edit is not proof that no change
 occurred. Avoid automatic retries that create duplicate artwork.
 
+## Save the open desktop document
+
+With one window in the ordinary Inkscape instance, call `inkscape_system`:
+
+```json
+{"operation": "save_document", "session_id": "desktop"}
+```
+
+The drawing must already have an SVG filename. For an unnamed document, assign
+one using **File → Save As** in Inkscape first. A successful response includes
+`data.output_path`, `data.verified: true`, and `data.live_document_saved: true`.
+Check those fields to confirm where the open drawing was saved.
+
+The current filename comes directly from Inkscape, so a subsequent GUI **Save As**
+is respected. Omit `output_path` on this operation; if supplied, it must identify
+that same filename. A different path is rejected before saving. Use `save_copy`
+with a destination to export a live copy, or the GUI **Save As** command to change
+the document's filename.
+
 ## Work with multiple documents
 
 Install the extension before opening managed instances. Each managed document
@@ -150,7 +169,7 @@ not an ID to invent.
 }
 ```
 
-Save that drawing to the path it was opened/created with:
+Save that drawing to its current Inkscape filename:
 
 ```json
 {"operation": "save_document", "session_id": "mcp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
@@ -166,11 +185,12 @@ To export a live SVG copy while keeping the window's filename unchanged:
 }
 ```
 
-`save_copy` is a verified snapshot export, not **Save As**. It also works for the
-ordinary `desktop` session. `save_document` requires a managed session and
-verifies the saved drawing against its live snapshot. If you manually changed
-the GUI filename with Save As, the original session path may no longer match;
-inspect the result rather than assuming it was saved there.
+`save_copy` works for managed sessions and the ordinary single-window `desktop`.
+It preserves the open drawing's filename and leaves pending changes unsaved,
+returning `data.live_document_saved: false`. Use `save_document` to save the open drawing
+itself; it verifies the disk content and returns `data.live_document_saved: true`.
+After a GUI **Save As**, it follows Inkscape's current filename rather than the
+session's original path. MCP does not perform **Save As**.
 
 Finally, after saving:
 

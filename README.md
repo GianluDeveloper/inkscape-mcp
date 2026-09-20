@@ -108,6 +108,17 @@ Use `{"operation":"active_document","session_id":"desktop"}` to inspect the
 current SVG, including unsaved edits. For your own artwork, call `insert_svg` with
 a complete `svg_content` document and the target `session_id`.
 
+To save changes in that window to its current SVG filename, call `inkscape_system`:
+
+```json
+{"operation": "save_document", "session_id": "desktop"}
+```
+
+The server verifies the saved content and returns `data.verified: true` and
+`data.live_document_saved: true`. It uses Inkscape's current filename, including
+changes made with **File → Save As**. For an unnamed drawing, use **Save As** in
+Inkscape first, or start a named drawing with `new_document`.
+
 ### Work with several documents
 
 Use `new_document` with a new `output_path`, or `open_document` with an existing
@@ -119,10 +130,14 @@ and closing operations; keyboard focus does not choose the target.
 {"operation": "new_document", "output_path": "/absolute/path/to/drawing.svg"}
 ```
 
-`list_documents` discovers live sessions. `save_document` saves a managed
-document to its original path and verifies it; `save_copy` writes live content to
-another `output_path` without changing the GUI filename. `close_document`
-requests a normal close and preserves Inkscape's unsaved-changes dialog.
+`list_documents` discovers live sessions. `save_document` saves either a managed
+document or the single-window `desktop` to its current filename. An `output_path`
+different from that filename is rejected before saving; change the filename
+through Inkscape's **Save As** dialog. `save_copy` writes live content to another
+`output_path` while keeping the GUI filename; pending changes in the open
+document still need to be saved.
+`close_document` requests a normal close of a managed session and preserves
+Inkscape's unsaved-changes dialog.
 
 See [the multi-document procedure](docs/USAGE.md#work-with-multiple-documents)
 for complete requests. An ordinary `desktop` instance with several windows is

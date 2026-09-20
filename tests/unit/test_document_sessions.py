@@ -139,6 +139,7 @@ async def test_open_persists_session_and_waits_for_bus(
     registry = json.loads(sessions._registry_path().read_text())
     assert registry["sessions"][SESSION]["input_path"] == str(sample_svg_file.resolve())
     assert spawn.call_args.kwargs["env"]["INKSCAPE_MCP_SESSION_ID"] == SESSION
+    assert spawn.call_args.kwargs["env"]["INKSCAPE_APP_ID_TAG"] == SESSION
 
 
 @pytest.mark.asyncio

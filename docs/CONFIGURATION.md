@@ -124,7 +124,9 @@ profile's `extensions/inkscape_mcp_live/` directory. The target Inkscape process
 must use the same profile. Restart existing windows after an installation/update
 when `needs_restart` is true.
 
-The session registry records managed application IDs and original SVG paths.
+The session registry records managed application IDs and their known SVG paths.
+Saving uses the current filename reported by Inkscape; a GUI **Save As** takes
+precedence over a stale registry path.
 The session bus determines whether an instance is still open; a stale registry
 entry is not proof of a live document. Do not edit/delete exchange files while a
 live operation is pending.

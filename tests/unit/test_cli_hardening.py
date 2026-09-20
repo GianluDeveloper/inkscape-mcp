@@ -1,6 +1,7 @@
 """Failure-path regressions for native Inkscape processes and atomic exports."""
 
 import asyncio
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock
 from unittest.mock import patch
@@ -256,6 +257,41 @@ async def test_concurrency_limits_and_gui_serialization(mock_cli_wrapper, gui):
     else:
         tags = [next(a for a in args if a.startswith("--app-id-tag=")) for args in commands]
         assert len(set(tags)) == 5
+
+
+@pytest.mark.parametrize("explicit", [None, "joined", "separate"])
+async def test_batch_identity_is_set_before_native_construction(
+    mock_cli_wrapper, monkeypatch, explicit
+):
+    monkeypatch.setenv("INKSCAPE_APP_ID_TAG", "unrelated_parent")
+    command = ["inkscape", "--query-all", "drawing.svg"]
+    if explicit == "joined":
+        command.insert(1, "--app-id-tag=requested_instance")
+    elif explicit == "separate":
+        command[1:1] = ["--app-id-tag", "requested_instance"]
+    spawn = AsyncMock(return_value=Process())
+    with patch("asyncio.create_subprocess_exec", spawn):
+        await mock_cli_wrapper._execute_command(command, 5)
+    environment_tag = spawn.call_args.kwargs["env"]["INKSCAPE_APP_ID_TAG"]
+    if explicit:
+        assert environment_tag == "requested_instance"
+    else:
+        assert environment_tag.startswith("inkscape-mcp-")
+        assert f"--app-id-tag={environment_tag}" in spawn.call_args.args
+    assert os.environ["INKSCAPE_APP_ID_TAG"] == "unrelated_parent"
+
+
+@pytest.mark.parametrize("active_flag", ["--active-window", "-q"])
+async def test_live_bridge_preserves_native_application_environment(
+    mock_cli_wrapper, monkeypatch, active_flag
+):
+    monkeypatch.setenv("INKSCAPE_APP_ID_TAG", "existing_desktop")
+    command = ["inkscape", active_flag, "--actions=query-all"]
+    spawn = AsyncMock(return_value=Process())
+    with patch("asyncio.create_subprocess_exec", spawn):
+        await mock_cli_wrapper._execute_command(command, 5)
+    assert spawn.call_args.args == tuple(command)
+    assert spawn.call_args.kwargs["env"]["INKSCAPE_APP_ID_TAG"] == "existing_desktop"
 
 
 @pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])

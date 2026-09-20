@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import os
 import re
 from collections import deque
 from pathlib import Path
@@ -67,9 +68,10 @@ class ShellModeWrapper:
             await self._stop(graceful=False)
             self._output_tail.clear()
             try:
+                tag = f"inkscape_mcp_{uuid4().hex}"
                 self._proc = await asyncio.create_subprocess_exec(
                     self._exe,
-                    f"--app-id-tag=inkscape_mcp_{uuid4().hex}",
+                    f"--app-id-tag={tag}",
                     "--batch-process",
                     "--shell",
                     stdin=asyncio.subprocess.PIPE,
@@ -77,6 +79,9 @@ class ShellModeWrapper:
                     # One ordered stream makes action errors visible before the
                     # following prompt, even when Inkscape keeps running/returns 0.
                     stderr=asyncio.subprocess.STDOUT,
+                    # Apply isolation before Inkscape's constructor probes the
+                    # default D-Bus name; the CLI flag is processed too late.
+                    env={**os.environ, "INKSCAPE_APP_ID_TAG": tag},
                 )
                 await asyncio.wait_for(self._read_until_prompt(), timeout=self._startup_timeout)
             except asyncio.CancelledError:

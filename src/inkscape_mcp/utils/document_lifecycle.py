@@ -15,6 +15,7 @@ from inkscape_mcp.utils.live_document import _snapshot
 from inkscape_mcp.utils.live_document import _window_action
 from inkscape_mcp.utils.live_document import configured_svg_limit
 from inkscape_mcp.utils.live_document import validate_svg
+from inkscape_mcp.utils.live_extension import inspect_document
 
 SODIPODI = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
 INKSCAPE = "http://www.inkscape.org/namespaces/inkscape"
@@ -81,10 +82,10 @@ async def document_lifecycle(operation, session_id, output_path, cli_wrapper, co
         raise ValueError(f"Unknown document lifecycle operation: {operation}")
     async with cli_wrapper._gui_lock:
         target = await document_sessions.get_session(session_id, cli_wrapper, config)
-        if operation != "save_copy" and not target["managed"]:
+        if operation == "close_document" and not target["managed"]:
             raise ValueError(
-                f"{operation} requires a managed session ID. Use save_copy for an existing desktop "
-                "document, or open_document/new_document for independently addressed workflows."
+                "close_document requires a managed session ID from open_document/new_document. "
+                "Close ordinary desktop windows through Inkscape."
             )
         if operation == "close_document":
             # Closing the last document creates a new blank document in the same
@@ -118,69 +119,120 @@ async def document_lifecycle(operation, session_id, output_path, cli_wrapper, co
                 "closed": True,
             }
 
-        destination = document_sessions._document_path(
-            output_path if operation == "save_copy" else target.get("input_path", ""), config
-        )
+        limit = configured_svg_limit(config)
+        if operation == "save_document":
+            # DOCUMENT_PATH is supplied by Inkscape itself to the effect. A
+            # basename from the SVG or a launch-time registry path cannot tell
+            # us where a document is currently saved after a GUI Save As.
+            inspection = await inspect_document(target, timeout=min(config.process_timeout, 30))
+            native_path = inspection.get("active_document", {}).get("path", "")
+            if not native_path or not Path(native_path).is_absolute():
+                raise ValueError(
+                    "This document has no native filename yet. Use Inkscape File > Save As "
+                    "once, or create a named document with new_document. save_copy only writes "
+                    "a copy and does not mark the open document as saved."
+                )
+            destination = document_sessions._document_path(native_path, config)
+            if output_path and document_sessions._document_path(output_path, config) != destination:
+                raise ValueError(
+                    f"save_document saves the open document at {destination}. A different "
+                    "output_path is not Save As: use save_copy for a copy, or change the "
+                    "filename in Inkscape first. No save was sent."
+                )
+            before = validate_svg(inspection["svg_content"], max_bytes=limit)
+            expected = drawing_fingerprint(before)
+        else:
+            destination = document_sessions._document_path(output_path, config)
         if not destination.parent.is_dir():
             raise ValueError(f"Destination directory does not exist: {destination.parent}")
         verified_content = None
-        limit = configured_svg_limit(config)
         if operation == "save_copy":
             # Export directly beside the final path to retain linked image URLs
             # when the copy goes to a different directory. Commit atomically.
             with cli_wrapper._export_target(str(destination), suffix=".svg") as staged:
                 before = await _snapshot(cli_wrapper, config, staged, target)
                 expected = drawing_fingerprint(before)
-            message = "Saved a verified copy of the live document"
+            message = "Saved a verified copy. The open document's filename and unsaved state are unchanged"
         else:
-            with _comparison_snapshot(destination) as snapshot:
-                before = await _snapshot(cli_wrapper, config, snapshot, target)
-                expected = drawing_fingerprint(before)
-                await _window_action(target, "document-save")
-                last_normalized_content = None
-                for _ in range(50):
-                    try:
-                        content = destination.read_text(encoding="utf-8")
-                        saved = validate_svg(content, max_bytes=limit)
-                        if drawing_fingerprint(saved) == expected:
-                            break
-                        if content != last_normalized_content:
-                            # Saving an unmodified document is a native no-op.
-                            # Its disk SVG may lack IDs/namedview/defs added on
-                            # load. Normalize a read-only copy with Inkscape to
-                            # compare equivalent documents without overwriting.
-                            last_normalized_content = content
-                            with _comparison_snapshot(destination) as normalized_path:
-                                await cli_wrapper.export_file(
-                                    str(destination), str(normalized_path), export_type="svg"
-                                )
-                                normalized = validate_svg(
-                                    normalized_path.read_text(encoding="utf-8"), max_bytes=limit
-                                )
-                            if (
-                                drawing_fingerprint(normalized) == expected
-                                and destination.read_text(encoding="utf-8") == content
+            # Inspection emits no SVG back into Inkscape. Do not export the live
+            # document here: GUI export state can change the document itself.
+            await _window_action(target, "document-save")
+            last_normalized_content = None
+            normalized_expected = None
+            for _ in range(50):
+                try:
+                    content = destination.read_text(encoding="utf-8")
+                    saved = validate_svg(content, max_bytes=limit)
+                    if drawing_fingerprint(saved) == expected:
+                        break
+                    if content != last_normalized_content:
+                        # Saving an unmodified document is a native no-op.
+                        # Its disk SVG may lack IDs/defaults added on load.
+                        # Normalize both sides: the exporter also canonicalizes
+                        # colors and default attributes. Keep the page extent
+                        # and resource base; never export the live GUI here.
+                        last_normalized_content = content
+                        with _comparison_snapshot(destination) as normalized_path:
+                            await cli_wrapper.export_file(
+                                str(destination),
+                                str(normalized_path),
+                                export_type="svg",
+                                export_area="page",
+                            )
+                            normalized = validate_svg(
+                                normalized_path.read_text(encoding="utf-8"), max_bytes=limit
+                            )
+                        if normalized_expected is None:
+                            with (
+                                _comparison_snapshot(destination) as live_source,
+                                _comparison_snapshot(destination) as live_normalized,
                             ):
-                                verified_content = content
-                                break
-                    except (OSError, ValueError):
-                        pass
-                    await asyncio.sleep(0.1)
-                else:
-                    raise InkscapeExecutionError(
-                        "Native save could not be verified at the session's original path. "
-                        "Check whether the GUI filename changed or a save dialog is open."
-                    )
-            message = "Saved the managed document and verified its contents on disk"
+                                live_source.write_text(inspection["svg_content"], encoding="utf-8")
+                                await cli_wrapper.export_file(
+                                    str(live_source),
+                                    str(live_normalized),
+                                    export_type="svg",
+                                    export_area="page",
+                                )
+                                normalized_expected = drawing_fingerprint(
+                                    validate_svg(
+                                        live_normalized.read_text(encoding="utf-8"), max_bytes=limit
+                                    )
+                                )
+                        if (
+                            drawing_fingerprint(normalized) == normalized_expected
+                            and destination.read_text(encoding="utf-8") == content
+                        ):
+                            verified_content = content
+                            break
+                except (OSError, ValueError):
+                    pass
+                await asyncio.sleep(0.1)
+            else:
+                raise InkscapeExecutionError(
+                    "Native save could not be verified at the open document's path. "
+                    "Check whether a save dialog is open or the drawing changed during saving."
+                )
+            message = "Saved the open Inkscape document natively and verified its contents on disk"
         content = destination.read_text(encoding="utf-8")
         saved = validate_svg(content, max_bytes=limit)
         if drawing_fingerprint(saved) != expected and content != verified_content:
             raise InkscapeExecutionError("Saved content differs from the live snapshot")
+        if (
+            operation == "save_document"
+            and target["managed"]
+            and target.get("input_path") != str(destination)
+        ):
+            async with document_sessions._registry() as (path, sessions):
+                if session_id in sessions:
+                    sessions[session_id]["input_path"] = str(destination)
+                    document_sessions._save_registry(path, sessions)
         return {
             "message": message,
             "session_id": session_id,
             "output_path": str(destination),
             "verified": True,
             "saved_copy": operation == "save_copy",
+            "live_document_saved": operation == "save_document",
             "bytes": destination.stat().st_size,
         }
